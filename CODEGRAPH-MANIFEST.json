@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "name": "super-turing-opencode-codegraph",
+  "version": "0.1.0-alpha.1",
+  "channel": "alpha",
+  "upstream": {
+    "repository": "https://github.com/colbymchenry/codegraph",
+    "package": "@colbymchenry/codegraph",
+    "version": "1.5.0",
+    "release": "https://github.com/colbymchenry/codegraph/releases/tag/v1.5.0",
+    "npmIntegrity": "sha512-/l1JMVOQ9WGQLrc/IIuAg7Igr944t79/oNCJTcnGkYtIeQx2XFIqI0ho+9Les/Yu4zKfmPU17hIUshD6yP1fKw=="
+  },
+  "managedFiles": [
+    "PLAYBOOK-CODEGRAPH.md",
+    "commands/codegraph-init.md",
+    "commands/codegraph-reindex.md",
+    "commands/codegraph-status.md",
+    "commands/codegraph-sync.md",
+    "skills/codegraph-analisis-estructural/SKILL.md",
+    "scripts/codegraph_env.sh",
+    "scripts/codegraph_project.py",
+    "scripts/codegraph_project_init.sh",
+    "scripts/codegraph_project_reindex.sh",
+    "scripts/codegraph_project_status.sh",
+    "scripts/codegraph_project_sync.sh"
+  ],
+  "machineLocalState": [
+    "~/.local/share/super-turing-opencode-codegraph/runtime/",
+    "~/.local/state/super-turing-opencode-codegraph/projects.json",
+    "<repo>/.codegraph/",
+    "~/.codegraph/"
+  ],
+  "mcp": {
+    "server": "codegraph",
+    "command": ["<managed-runtime>/codegraph", "serve", "--mcp"],
+    "tools": ["explore"],
+    "telemetry": false,
+    "updateCheck": false
+  },
+  "notes": [
+    "El addon administra runtime, MCP y lifecycle global; cada índice sigue siendo local al root del repositorio.",
+    "Un índice existente se adopta in situ si CodeGraph lo reporta compatible.",
+    "El uninstall global no borra índices .codegraph ni configuraciones codegraph.json de proyectos.",
+    "Los worktrees requieren índices independientes y nunca comparten .codegraph."
+  ]
+}
