@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- `scripts/preflight.sh` valida Python, Git, Node y npm antes de que la distribución modifique el target.
+
 ## [0.1.0-alpha.1] - 2026-08-15
 
 ### Added

@@ -14,6 +14,9 @@
 bash scripts/install.sh
 ```
 
+El mismo contrato expone `scripts/preflight.sh`; la distribución lo ejecuta
+antes de modificar el target para validar Python, Git, Node y npm.
+
 Opciones:
 
 ```text
