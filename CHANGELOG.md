@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- La skill global absorbe las heurísticas reutilizables descubiertas en overlays AUNE: presupuesto por fase, CodeGraph como reemplazo de exploración y corte temprano cuando no reduce lecturas.
+- Las variantes locales deberían conservar solo lentes de dominio, no copiar el procedimiento global.
+
 - `scripts/preflight.sh` valida Python, Git, Node y npm antes de que la distribución modifique el target.
 
 ## [0.1.0-alpha.1] - 2026-08-15
