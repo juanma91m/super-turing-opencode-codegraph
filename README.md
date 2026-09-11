@@ -12,6 +12,7 @@ Este repo es dueño de:
 - wrappers seguros para `init`, `status`, `sync` y reindex explícito,
 - lifecycle `install` / `status` / `uninstall`,
 - skill y playbook de análisis estructural.
+- benchmark A/B sanitizado para medir costo, reemplazo de búsqueda manual y calidad.
 
 No es dueño de:
 
@@ -75,6 +76,22 @@ Operaciones normales:
 /codegraph-sync /ruta/al/repo
 ```
 
+Medir dos sesiones equivalentes:
+
+```bash
+/codegraph-benchmark capture --session <id-con> --variant with-codegraph --pair-id flujo-auth-01 --project higyrus --task-kind blast-radius --outcome accepted
+/codegraph-benchmark capture --session <id-sin> --variant without-codegraph --pair-id flujo-auth-01 --project higyrus --task-kind blast-radius --outcome accepted
+/codegraph-benchmark report
+```
+
+El porcentaje principal compara tokens totales por pares y solo incluye resultados
+`accepted` del mismo proyecto, modelo y tipo de tarea. Los registros se guardan en
+`~/.local/state/super-turing-opencode-codegraph/benchmarks/` sin prompts ni outputs
+crudos.
+
+La captura debe ejecutarse desde una sesión operadora distinta de las dos sesiones
+medidas, para no agregar el propio comando de benchmark a sus tokens y tools.
+
 Reindexar es explícito porque reemplaza el índice regenerable actual:
 
 ```bash
@@ -97,6 +114,7 @@ Reindexar es explícito porque reemplaza el índice regenerable actual:
 - Roots `/`, `$HOME`, directorios temporales y escapes por symlink son rechazados.
 - `uninit` y `unlock` no se exponen como autonomía normal.
 - El output del grafo se trata como evidencia; no reemplaza lectura puntual ni criterio técnico.
+- El benchmark usa `opencode export --sanitize` y persiste únicamente agregados y metadatos mínimos.
 
 ## Estado y desinstalación
 

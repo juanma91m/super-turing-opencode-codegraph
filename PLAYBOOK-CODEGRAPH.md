@@ -60,3 +60,20 @@ Cada worktree representa contenido distinto y debe tener su propio `.codegraph/`
 - `planner`: usa el grafo para alcance y flujos no triviales.
 - `reviewer` / `code-reviewer`: lo usa para impacto material, no para inventar findings.
 - `master-dev`: lo usa antes de cambios estructurales cuando reduce exploración y riesgo.
+
+## Medición A/B
+
+Para comprobar el beneficio, comparar pares de sesiones nuevas con igual proyecto,
+modelo, tarea y criterio de aceptación. Etiquetar una variante `with-codegraph` y la
+otra `without-codegraph` mediante `/codegraph-benchmark`.
+
+La métrica principal es la mejora porcentual pareada de tokens totales:
+
+```text
+(tokens_sin - tokens_con) / tokens_sin * 100
+```
+
+Un valor positivo mejora; uno negativo empeora. Complementar con duración, reducción
+de `glob`/`grep`/`read`, bytes de output de búsqueda, tasa de aceptación y retrabajo.
+Solo los pares donde ambas variantes fueron aceptadas cuentan para el porcentaje
+principal. No usar el error técnico cero como sustituto de calidad funcional.

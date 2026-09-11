@@ -49,6 +49,31 @@ managed_files_missing=0
 managed_files_mismatched=0
 ```
 
+## Benchmark A/B
+
+Capturar las dos variantes de una tarea comparable:
+
+```bash
+bash ~/.config/opencode/scripts/codegraph_metrics.sh capture \
+  --session <id> \
+  --variant with-codegraph \
+  --pair-id <par> \
+  --project <proyecto> \
+  --task-kind <tipo> \
+  --outcome accepted
+
+bash ~/.config/opencode/scripts/codegraph_metrics.sh report
+```
+
+Usar sesiones nuevas con el mismo proyecto, tarea y modelo. La variante
+`with-codegraph` debe contener al menos una llamada al grafo y la variante
+`without-codegraph` ninguna; el helper rechaza etiquetas inconsistentes.
+Ejecutar `capture` desde una sesión operadora separada para no contaminar las
+sesiones medidas con el propio comando.
+
+El estado vive en `~/.local/state/super-turing-opencode-codegraph/benchmarks/`.
+Solo persiste métricas sanitizadas: no guarda prompts, respuestas ni outputs de tools.
+
 ## Bootstrap de un proyecto
 
 ```bash
