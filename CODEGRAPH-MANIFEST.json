@@ -21,6 +21,7 @@
     "scripts/codegraph_env.sh",
     "scripts/codegraph_metrics.py",
     "scripts/codegraph_metrics.sh",
+    "scripts/codegraph_telemetry.py",
     "scripts/codegraph_project.py",
     "scripts/codegraph_project_init.sh",
     "scripts/codegraph_project_reindex.sh",

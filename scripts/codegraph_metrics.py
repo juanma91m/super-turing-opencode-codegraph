@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -19,6 +20,7 @@ from typing import Any
 
 VARIANTS = ("with-codegraph", "without-codegraph")
 OUTCOMES = ("accepted", "partial", "reworked", "incorrect", "pending")
+UTILITIES = ("yes", "partial", "no", "not-evaluated", "not-applicable")
 MANUAL_SEARCH_TOOLS = {"glob", "grep", "read"}
 
 
@@ -87,13 +89,18 @@ def is_codegraph_tool(value: Any) -> bool:
     return "codegraph" in str(value or "").lower()
 
 
-def tool_duration_ms(state: dict[str, Any]) -> int:
+def tool_duration_ms(state: dict[str, Any]) -> int | None:
     timing = state.get("time") or {}
     start = timing.get("start", timing.get("created"))
     end = timing.get("end", timing.get("completed"))
     if isinstance(start, int) and isinstance(end, int) and end >= start:
         return end - start
-    return 0
+    return None
+
+
+def observed_sum(values: list[int | float | None]) -> int | float | None:
+    """Empty populations are zero; incomplete observations are not zero."""
+    return None if any(value is None for value in values) else sum(values)
 
 
 def model_label(meta: dict[str, Any]) -> str | None:
@@ -126,8 +133,9 @@ def summarize_tools(events: list[dict[str, Any]]) -> dict[str, Any]:
         names = Counter(item["name"] for item in items)
         return {
             "calls": len(items),
-            "output_bytes": sum(item["output_bytes"] for item in items),
-            "wall_ms": sum(item["duration_ms"] for item in items),
+            "output_bytes": observed_sum([item["output_bytes"] for item in items]),
+            "wall_ms": observed_sum([item["duration_ms"] for item in items]),
+            "latency_ms": distribution([item["duration_ms"] for item in items]),
             "by_name": dict(sorted(names.items())),
             "by_status": dict(sorted(statuses.items())),
         }
@@ -141,7 +149,7 @@ def summarize_tools(events: list[dict[str, Any]]) -> dict[str, Any]:
         "manual": manual,
         "combined": {
             "calls": codegraph["calls"] + manual["calls"],
-            "output_bytes": codegraph["output_bytes"] + manual["output_bytes"],
+            "output_bytes": observed_sum([codegraph["output_bytes"], manual["output_bytes"]]),
         },
         "first_codegraph_tool_position": first_codegraph,
     }
@@ -158,11 +166,13 @@ def compute_session_metrics(exported: dict[str, Any]) -> dict[str, Any]:
         "cache_read": 0,
         "cache_write": 0,
     }
+    token_values: dict[str, list[int | None]] = {name: [] for name in tokens}
     model_counts: Counter[str] = Counter()
     agent_counts: Counter[str] = Counter()
     tool_counts: Counter[str] = Counter()
     events: list[dict[str, Any]] = []
-    assistant_wall_ms = 0
+    assistant_times: list[int | None] = []
+    assistant_intervals: list[tuple[int, int]] = []
     tool_position = 0
 
     for message in messages:
@@ -175,18 +185,18 @@ def compute_session_metrics(exported: dict[str, Any]) -> dict[str, Any]:
             if agent:
                 agent_counts[str(agent)] += 1
             token_meta = meta.get("tokens") or {}
-            tokens["total"] += int(token_meta.get("total") or 0)
-            tokens["input"] += int(token_meta.get("input") or 0)
-            tokens["output"] += int(token_meta.get("output") or 0)
-            tokens["reasoning"] += int(token_meta.get("reasoning") or 0)
             cache = token_meta.get("cache") or {}
-            tokens["cache_read"] += int(cache.get("read") or 0)
-            tokens["cache_write"] += int(cache.get("write") or 0)
+            for name in token_values:
+                value = cache.get(name.removeprefix("cache_")) if name.startswith("cache_") else token_meta.get(name)
+                token_values[name].append(value if isinstance(value, (int, float)) and value >= 0 else None)
             timing = meta.get("time") or {}
             created = timing.get("created")
             completed = timing.get("completed")
             if isinstance(created, int) and isinstance(completed, int) and completed >= created:
-                assistant_wall_ms += completed - created
+                assistant_times.append(completed - created)
+                assistant_intervals.append((created, completed))
+            else:
+                assistant_times.append(None)
 
         for part in message.get("parts") or []:
             if part.get("type") != "tool":
@@ -207,11 +217,16 @@ def compute_session_metrics(exported: dict[str, Any]) -> dict[str, Any]:
                     "name": name,
                     "category": category,
                     "status": str(state.get("status") or "unknown"),
-                    "output_bytes": serialized_size(state.get("output")),
+                    "output_bytes": (
+                        state["output_bytes"] if "output_bytes" in state else
+                        serialized_size(state["output"]) if state.get("output") is not None else None
+                    ),
                     "duration_ms": tool_duration_ms(state),
                 }
             )
 
+    for name, values in token_values.items():
+        tokens[name] = observed_sum(values) if values else None
     session_time = info.get("time") or {}
     created = session_time.get("created")
     updated = session_time.get("updated")
@@ -238,13 +253,37 @@ def compute_session_metrics(exported: dict[str, Any]) -> dict[str, Any]:
         "tokens": tokens,
         "models": dict(sorted(model_counts.items())),
         "agents": dict(sorted(agent_counts.items())),
-        "timing": {"assistant_wall_ms": assistant_wall_ms},
+        "token_coverage": {
+            name: {"observations": len(values), "missing": sum(value is None for value in values)}
+            for name, values in token_values.items()
+        },
+        "timing": {
+            "assistant_wall_ms": observed_sum(assistant_times) if assistant_times else None,
+            "assistant_active_union_ms": (
+                interval_union_ms(assistant_intervals)
+                if assistant_times and all(value is not None for value in assistant_times) else None
+            ),
+        },
         "tools": {
             "count": sum(tool_counts.values()),
             "by_name": dict(sorted(tool_counts.items())),
         },
         "search": summarize_tools(events),
     }
+
+
+def interval_union_ms(intervals: list[tuple[int, int]]) -> int:
+    total = 0
+    start = end = None
+    for left, right in sorted(intervals):
+        if start is None:
+            start, end = left, right
+        elif left > end:
+            total += end - start
+            start, end = left, right
+        else:
+            end = max(end, right)
+    return total + (end - start if start is not None else 0)
 
 
 def validate_variant(metrics: dict[str, Any], variant: str) -> None:
@@ -281,26 +320,36 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
 
 
 def capture_record(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
-    exported = run_export(args.session)
-    metrics = compute_session_metrics(exported)
+    from codegraph_telemetry import capture_metrics
+
+    metrics, scope = capture_metrics(args)
     validate_variant(metrics, args.variant)
     session_id = metrics["session"].get("id")
     if session_id and session_id != args.session:
         raise ValueError(
-            f"La exportación devolvió otra sesión: esperada {args.session}, recibida {session_id}"
+            f"La captura devolvió otra sesión: esperada {args.session}, recibida {session_id}"
         )
     recommended_max_calls = 1 if "review" in args.task_kind.lower() else 3
     codegraph = metrics["search"]["codegraph"]
     record = {
-        "schema_version": 1,
+        "schema_version": 2,
         "captured_at": now_iso(),
         "experiment": "codegraph-ab",
         "pair_id": args.pair_id,
         "project": args.project,
         "variant": args.variant,
         "task_kind": args.task_kind,
+        "task_id": args.task_id or args.pair_id,
+        "policy_version": args.policy_version,
+        "scope": scope,
         "outcome": args.outcome,
+        "evaluation": {
+            "utility": args.utility,
+            "corrections_required": args.corrections_required,
+            "source": "explicit-operator-input",
+        },
         "runtime": load_marker(args.marker),
+        "runtime_provenance": "installation-at-capture; not historical session runtime",
         "budget": {
             "applicable": args.variant == "with-codegraph",
             "recommended_max_calls": recommended_max_calls,
@@ -312,15 +361,16 @@ def capture_record(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
             ),
             "output_compliant": (
                 codegraph["output_bytes"] <= 10 * 1024
-                if args.variant == "with-codegraph"
+                if args.variant == "with-codegraph" and codegraph["output_bytes"] is not None
                 else None
             ),
         },
         "metrics": metrics,
     }
-    filename = "--".join(
-        [safe_slug(args.pair_id), args.variant, safe_slug(args.session)]
-    ) + ".json"
+    identity = json.dumps([args.pair_id, args.variant, args.session, args.task_id or args.pair_id,
+                           args.from_message, args.to_message], ensure_ascii=False)
+    filename = "--".join([safe_slug(args.pair_id), args.variant,
+                          hashlib.sha256(identity.encode()).hexdigest()[:20]]) + ".json"
     output = args.state_dir / "runs" / filename
     atomic_write_json(output, record)
     return record, output
@@ -334,15 +384,29 @@ def percentile(values: list[float], percentile_value: float) -> float | None:
     return ordered[index]
 
 
-def nested_number(record: dict[str, Any], path: tuple[str, ...]) -> float:
+def distribution(values: list[int | float | None]) -> dict[str, Any]:
+    known = [value for value in values if value is not None]
+    return {
+        "observations": len(values), "available": len(known),
+        "missing": len(values) - len(known),
+        "sum": observed_sum(values) if values else None,
+        "mean": sum(known) / len(known) if known else None,
+        "median": median(known) if known else None,
+        "p75": percentile(known, .75), "p90": percentile(known, .90),
+    }
+
+
+def nested_number(record: dict[str, Any], path: tuple[str, ...]) -> float | None:
     value: Any = record
     for part in path:
-        value = value[part]
-    return float(value or 0)
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return float(value) if isinstance(value, (int, float)) else None
 
 
-def improvement_percent(with_value: float, without_value: float) -> float | None:
-    if without_value == 0:
+def improvement_percent(with_value: float | None, without_value: float | None) -> float | None:
+    if with_value is None or without_value is None or without_value == 0:
         return None
     return (without_value - with_value) / without_value * 100
 
@@ -363,12 +427,32 @@ def compatible_pair(with_record: dict[str, Any], without_record: dict[str, Any])
         return "modelo distinto"
     if with_record.get("project") != without_record.get("project"):
         return "proyecto distinto"
+    if not with_metrics.get("models") or not without_metrics.get("models"):
+        return "modelo no disponible"
+    if len(with_metrics["models"]) != 1:
+        return "múltiples modelos: no aislar efecto CodeGraph"
+    if with_record.get("schema_version", 1) < 2 or without_record.get("schema_version", 1) < 2:
+        return "registro legacy sin alcance de tarea/política verificable"
+    for field in ("task_id", "policy_version"):
+        if not with_record.get(field) or not without_record.get(field):
+            return f"{field} no disponible"
+        if with_record[field] != without_record[field]:
+            return f"{field} distinto"
+    if (with_record.get("scope") or {}).get("boundary_kind") not in ("message-range", "dedicated-task-session"):
+        return "alcance de tarea no disponible"
+    if with_record["scope"].get("boundary_kind") != (without_record.get("scope") or {}).get("boundary_kind"):
+        return "alcances distintos"
     return None
 
 
 REPORT_METRICS = {
     "total_tokens": ("metrics", "tokens", "total"),
+    **{f"tokens_{name}": ("metrics", "tokens", name) for name in (
+        "input", "cache_read", "cache_write", "output", "reasoning"
+    )},
     "assistant_wall_ms": ("metrics", "timing", "assistant_wall_ms"),
+    "assistant_active_union_ms": ("metrics", "timing", "assistant_active_union_ms"),
+    "codegraph_latency_ms": ("metrics", "search", "codegraph", "latency_ms", "median"),
     "manual_calls": ("metrics", "search", "manual", "calls"),
     "manual_output_bytes": ("metrics", "search", "manual", "output_bytes"),
     "search_output_bytes": ("metrics", "search", "combined", "output_bytes"),
@@ -378,12 +462,16 @@ REPORT_METRICS = {
 def build_report(records: list[dict[str, Any]]) -> dict[str, Any]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     outcomes: dict[str, Counter[str]] = {variant: Counter() for variant in VARIANTS}
+    utilities: dict[str, Counter[str]] = {variant: Counter() for variant in VARIANTS}
     budgets: dict[str, list[bool]] = {variant: [] for variant in VARIANTS}
     for record in records:
         grouped.setdefault(record["pair_id"], []).append(record)
         outcomes[record["variant"]][record.get("outcome") or "pending"] += 1
+        utilities[record["variant"]][(record.get("evaluation") or {}).get("utility") or "not-evaluated"] += 1
         budget = record.get("budget") or {}
-        if record["variant"] == "with-codegraph" and budget.get("applicable", True):
+        if record["variant"] == "with-codegraph" and budget.get("applicable", True) and all(
+            budget.get(field) is not None for field in ("calls_compliant", "output_compliant")
+        ):
             budgets[record["variant"]].append(
                 bool(budget.get("calls_compliant"))
                 and bool(budget.get("output_compliant"))
@@ -392,6 +480,9 @@ def build_report(records: list[dict[str, Any]]) -> dict[str, Any]:
     complete_pairs: list[dict[str, Any]] = []
     excluded: list[dict[str, str]] = []
     for pair_id, pair_records in sorted(grouped.items()):
+        if any(sum(r["variant"] == variant for r in pair_records) > 1 for variant in VARIANTS):
+            excluded.append({"pair_id": pair_id, "reason": "más de una corrida por variante: usar pair-id único por repetición"})
+            continue
         selected = latest_by_variant(pair_records)
         if not all(variant in selected for variant in VARIANTS):
             excluded.append({"pair_id": pair_id, "reason": "falta una variante"})
@@ -415,18 +506,71 @@ def build_report(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "without_codegraph": without_value,
             }
             deltas[name] = improvement_percent(with_value, without_value)
-        complete_pairs.append({"pair_id": pair_id, "values": values, "improvement_pct": deltas})
+        complete_pairs.append({
+            "pair_id": pair_id, "values": values, "improvement_pct": deltas,
+            "dimensions": {
+                "project": with_record["project"], "model": next(iter(with_record["metrics"]["models"])),
+                "task_kind": with_record["task_kind"], "policy_version": with_record["policy_version"],
+            },
+        })
 
+    aggregate = summarize_pairs(complete_pairs)
+    strata: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for pair in complete_pairs:
+        key = tuple(pair["dimensions"][name] for name in ("project", "model", "task_kind", "policy_version"))
+        strata.setdefault(key, []).append(pair)
+
+    quality: dict[str, Any] = {}
+    for variant in VARIANTS:
+        counts = outcomes[variant]
+        total = sum(counts.values())
+        evaluated = total - counts["pending"]
+        corrections = [(record.get("evaluation") or {}).get("corrections_required")
+                       for record in records if record["variant"] == variant]
+        quality[variant] = {
+            "runs": total,
+            "evaluated_runs": evaluated,
+            "by_outcome": dict(sorted(counts.items())),
+            "utility": dict(sorted(utilities[variant].items())),
+            "corrections_required": distribution(corrections),
+            "acceptance_rate_pct": (counts["accepted"] / evaluated * 100) if evaluated else None,
+            "budget_compliance_rate_pct": (
+                sum(budgets[variant]) / len(budgets[variant]) * 100
+                if budgets[variant] else None
+            ),
+        }
+
+    return {
+        "schema_version": 2,
+        "experiment": "codegraph-ab",
+        "generated_at": now_iso(),
+        "runs_total": len(records),
+        "complete_accepted_pairs": len(complete_pairs),
+        "quality": quality,
+        "aggregate": aggregate,
+        "strata": [{"dimensions": pairs[0]["dimensions"], "pairs": len(pairs), "aggregate": summarize_pairs(pairs)}
+                   for _, pairs in sorted(strata.items())],
+        "pairs": complete_pairs,
+        "excluded_pairs": excluded,
+    }
+
+
+def summarize_pairs(complete_pairs: list[dict[str, Any]]) -> dict[str, Any]:
     aggregate: dict[str, Any] = {}
     for name in REPORT_METRICS:
-        with_values = [pair["values"][name]["with_codegraph"] for pair in complete_pairs]
-        without_values = [pair["values"][name]["without_codegraph"] for pair in complete_pairs]
+        available_pairs = [pair for pair in complete_pairs if all(
+            pair["values"][name][variant] is not None for variant in ("with_codegraph", "without_codegraph")
+        )]
+        with_values = [pair["values"][name]["with_codegraph"] for pair in available_pairs]
+        without_values = [pair["values"][name]["without_codegraph"] for pair in available_pairs]
         paired_deltas = [
             pair["improvement_pct"][name]
             for pair in complete_pairs
             if pair["improvement_pct"][name] is not None
         ]
         aggregate[name] = {
+            "available_pairs": len(available_pairs),
+            "missing_pairs": len(complete_pairs) - len(available_pairs),
             "with_codegraph_median": median(with_values) if with_values else None,
             "with_codegraph_p75": percentile(with_values, 0.75),
             "without_codegraph_median": median(without_values) if without_values else None,
@@ -434,32 +578,7 @@ def build_report(records: list[dict[str, Any]]) -> dict[str, Any]:
             "paired_improvement_pct_median": median(paired_deltas) if paired_deltas else None,
         }
 
-    quality: dict[str, Any] = {}
-    for variant in VARIANTS:
-        counts = outcomes[variant]
-        total = sum(counts.values())
-        quality[variant] = {
-            "runs": total,
-            "by_outcome": dict(sorted(counts.items())),
-            "acceptance_rate_pct": (counts["accepted"] / total * 100) if total else None,
-            "budget_compliance_rate_pct": (
-                sum(budgets[variant]) / len(budgets[variant]) * 100
-                if budgets[variant]
-                else None
-            ),
-        }
-
-    return {
-        "schema_version": 1,
-        "experiment": "codegraph-ab",
-        "generated_at": now_iso(),
-        "runs_total": len(records),
-        "complete_accepted_pairs": len(complete_pairs),
-        "quality": quality,
-        "aggregate": aggregate,
-        "pairs": complete_pairs,
-        "excluded_pairs": excluded,
-    }
+    return aggregate
 
 
 def load_records(state_dir: Path) -> list[dict[str, Any]]:
@@ -494,12 +613,17 @@ def report_markdown(report: dict[str, Any]) -> str:
         "",
         "Un porcentaje positivo indica mejora con CodeGraph; uno negativo indica regresión.",
         "",
-        "| Métrica | Sin CodeGraph (mediana) | Con CodeGraph (mediana) | Mejora pareada (mediana) |",
-        "|---|---:|---:|---:|",
+        "Tokens incluyen caché y contexto repetido; no equivalen a costo facturado. n/a no significa cero.",
+        "",
+        "| Métrica | Sin CodeGraph (mediana) | Con CodeGraph (mediana) | Mejora pareada (mediana) | Pares con dato |",
+        "|---|---:|---:|---:|---:|",
     ]
     labels = {
         "total_tokens": "Tokens totales",
+        **{f"tokens_{name}": f"Tokens {name}" for name in ("input", "cache_read", "cache_write", "output", "reasoning")},
         "assistant_wall_ms": "Tiempo de asistente (ms)",
+        "assistant_active_union_ms": "Tiempo activo sin solapamientos (ms)",
+        "codegraph_latency_ms": "Latencia CodeGraph por llamada (ms)",
         "manual_calls": "Llamadas manuales",
         "manual_output_bytes": "Output manual (bytes)",
         "search_output_bytes": "Output total de búsqueda (bytes)",
@@ -508,7 +632,7 @@ def report_markdown(report: dict[str, Any]) -> str:
         lines.append(
             f"| {labels[name]} | {format_value(values['without_codegraph_median'])} | "
             f"{format_value(values['with_codegraph_median'])} | "
-            f"{format_value(values['paired_improvement_pct_median'], '%')} |"
+            f"{format_value(values['paired_improvement_pct_median'], '%')} | {values['available_pairs']} |"
         )
 
     lines.extend(
@@ -527,6 +651,20 @@ def report_markdown(report: dict[str, Any]) -> str:
             f"{format_value(values['acceptance_rate_pct'], '%')} | "
             f"{format_value(values['budget_compliance_rate_pct'], '%')} |"
         )
+    lines.append("")
+    for variant in VARIANTS:
+        values = report["quality"][variant]
+        lines.append(f"- {variant}: evaluadas {values['evaluated_runs']}/{values['runs']}; "
+                     f"utilidad explícita {json.dumps(values['utility'], ensure_ascii=False)}; "
+                     f"correcciones mediana {format_value(values['corrections_required']['median'])}.")
+    if report.get("strata"):
+        lines.extend(["", "## Resultados estratificados", ""])
+        for group in report["strata"]:
+            dims = group["dimensions"]
+            value = group["aggregate"]["total_tokens"]
+            lines.append(f"- {dims['project']} / {dims['model']} / {dims['task_kind']} / "
+                         f"{dims['policy_version']}: {group['pairs']} pares, mejora tokens "
+                         f"{format_value(value['paired_improvement_pct_median'], '%')}.")
     if report["excluded_pairs"]:
         lines.extend(["", "## Pares excluidos", ""])
         for item in report["excluded_pairs"]:
@@ -564,8 +702,7 @@ def command_report(args: argparse.Namespace) -> int:
         else report_markdown(report)
     )
     if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(content, encoding="utf-8")
+        atomic_write_json(args.output, report) if args.json else write_private_text(args.output, content)
     print(content, end="")
     return 0
 
@@ -583,12 +720,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    capture = sub.add_parser("capture", help="Captura una sesión para un par A/B")
+    capture = sub.add_parser("capture", help="Captura una tarea explícita y sus sesiones hijas verificables")
     capture.add_argument("--session", required=True)
     capture.add_argument("--variant", required=True, choices=VARIANTS)
     capture.add_argument("--pair-id", required=True)
     capture.add_argument("--project", required=True)
     capture.add_argument("--task-kind", required=True)
+    capture.add_argument("--task-id", help="Default: pair-id")
+    capture.add_argument("--policy-version", required=True, help="Etiqueta explícita de la política usada; no se infiere del runtime actual")
+    capture.add_argument("--dedicated-task", action="store_true", help="Confirmar que la sesión completa corresponde a una tarea")
+    capture.add_argument("--from-message", help="ID inicial inclusivo en la sesión principal")
+    capture.add_argument("--to-message", help="ID final inclusivo en la sesión principal")
+    capture.add_argument("--database", type=Path, default=Path("~/.local/share/opencode/opencode.db").expanduser())
+    capture.add_argument("--utility", choices=UTILITIES, default="not-evaluated")
+    capture.add_argument("--corrections-required", type=int)
     capture.add_argument("--outcome", required=True, choices=OUTCOMES)
     capture.add_argument("--state-dir", type=Path, default=default_state)
     capture.add_argument("--marker", type=Path, default=default_marker)
@@ -599,7 +744,37 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--json", action="store_true")
     report.add_argument("--output", type=Path)
     report.set_defaults(handler=command_report)
+    history = sub.add_parser("history", help="Reporte histórico observacional desde SQLite read-only; no requiere capturas")
+    history.add_argument("--database", type=Path, default=Path("~/.local/share/opencode/opencode.db").expanduser())
+    history.add_argument("--since", required=True, help="ISO-8601 UTC inclusivo")
+    history.add_argument("--until", required=True, help="ISO-8601 UTC exclusivo")
+    history.add_argument("--project-root", type=Path)
+    history.add_argument("--model", help="Etiqueta exacta provider/model#variant; las familias mixtas no se recortan")
+    history.add_argument("--json", action="store_true")
+    history.add_argument("--output", type=Path)
+    history.set_defaults(handler=command_history)
     return parser
+
+
+def command_history(args: argparse.Namespace) -> int:
+    from codegraph_telemetry import history_report, history_markdown
+
+    if args.output and args.output.expanduser().resolve() == args.database.expanduser().resolve():
+        raise ValueError("El reporte no puede sobrescribir la base de telemetría")
+    report = history_report(args)
+    content = json.dumps(report, ensure_ascii=False, indent=2) + "\n" if args.json else history_markdown(report)
+    if args.output:
+        atomic_write_json(args.output, report) if args.json else write_private_text(args.output, content)
+    print(content, end="")
+    return 0
+
+
+def write_private_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        handle.write(content)
+        temp = Path(handle.name)
+    temp.replace(path)
 
 
 def main() -> int:

@@ -79,8 +79,8 @@ Operaciones normales:
 Medir dos sesiones equivalentes:
 
 ```bash
-/codegraph-benchmark capture --session <id-con> --variant with-codegraph --pair-id flujo-auth-01 --project higyrus --task-kind blast-radius --outcome accepted
-/codegraph-benchmark capture --session <id-sin> --variant without-codegraph --pair-id flujo-auth-01 --project higyrus --task-kind blast-radius --outcome accepted
+/codegraph-benchmark capture --session <id-con> --variant with-codegraph --pair-id flujo-auth-01 --project <proyecto> --task-kind blast-radius --policy-version <política> --dedicated-task --outcome accepted --utility yes --corrections-required 0
+/codegraph-benchmark capture --session <id-sin> --variant without-codegraph --pair-id flujo-auth-01 --project <proyecto> --task-kind blast-radius --policy-version <política> --dedicated-task --outcome accepted --utility not-applicable --corrections-required 0
 /codegraph-benchmark report
 ```
 
@@ -91,6 +91,22 @@ crudos.
 
 La captura debe ejecutarse desde una sesión operadora distinta de las dos sesiones
 medidas, para no agregar el propio comando de benchmark a sus tokens y tools.
+
+### Telemetría retrospectiva (sin capturas previas)
+
+```bash
+/codegraph-benchmark history --since 2026-09-12 --until 2026-10-25
+```
+
+Lee la base local de OpenCode en modo read-only, seleccionando en SQL solo uso,
+nombres de tools, relaciones y tiempos, nunca prompts, argumentos ni outputs crudos.
+Agrupa familias no solapadas por proyecto/modelo; no son tareas equivalentes.
+Incluye desglose de tokens, latencia, búsqueda manual y sesiones hijas verificables.
+No infiere calidad, tipo de tarea ni versión histórica de la política. No calcula
+porcentajes causales. Campos ausentes: `null` en JSON y `n/a` en Markdown.
+
+El esquema de métricas es v2 e independiente del pin de runtime. Para actualizar
+solo esta instrumentación: `bash scripts/install.sh --metrics-only`.
 
 Reindexar es explícito porque reemplaza el índice regenerable actual:
 
@@ -114,7 +130,7 @@ Reindexar es explícito porque reemplaza el índice regenerable actual:
 - Roots `/`, `$HOME`, directorios temporales y escapes por symlink son rechazados.
 - `uninit` y `unlock` no se exponen como autonomía normal.
 - El output del grafo se trata como evidencia; no reemplaza lectura puntual ni criterio técnico.
-- El benchmark usa `opencode export --sanitize` y persiste únicamente agregados y metadatos mínimos.
+- La instrumentación lee proyecciones de SQLite read-only y persiste únicamente agregados y metadatos mínimos. Los exports sanitizados siguen siendo compatibles con el extractor, pero no son necesarios para `history`/`capture`.
 
 ## Estado y desinstalación
 

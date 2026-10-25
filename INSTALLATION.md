@@ -23,6 +23,7 @@ Opciones:
 --target-dir <path>    config OpenCode destino
 --runtime-dir <path>   prefix machine-local del runtime
 --assets-only          no instalar ni actualizar runtime
+--metrics-only         actualizar solo métricas; no tocar runtime, MCP, skill, permisos ni marker
 --dry-run              mostrar acciones sin escribir
 --no-validate          omitir opencode debug config
 ```
@@ -60,6 +61,8 @@ bash ~/.config/opencode/scripts/codegraph_metrics.sh capture \
   --pair-id <par> \
   --project <proyecto> \
   --task-kind <tipo> \
+  --policy-version <política-realmente-usada> \
+  --dedicated-task \
   --outcome accepted
 
 bash ~/.config/opencode/scripts/codegraph_metrics.sh report
@@ -73,6 +76,22 @@ sesiones medidas con el propio comando.
 
 El estado vive en `~/.local/state/super-turing-opencode-codegraph/benchmarks/`.
 Solo persiste métricas sanitizadas: no guarda prompts, respuestas ni outputs de tools.
+
+### Instrumentación v2
+
+```bash
+bash scripts/install.sh --metrics-only
+bash ~/.config/opencode/scripts/codegraph_metrics.sh history \
+  --since 2026-09-12 --until 2026-10-25
+```
+
+`--metrics-only` copia únicamente el comando de benchmark, extractores/wrapper y
+el playbook. No invoca ni instala el runtime, no ejecuta el merge de configuración
+y no modifica el marker. Hace backup de assets reemplazados. Para rollback,
+restaurar únicamente esos assets desde `.codegraph-addon-backups/<timestamp>/`;
+el archivo nuevo `scripts/codegraph_telemetry.py` puede retirarse si antes no existía.
+
+Ver el contrato y las limitaciones de medición en `PLAYBOOK-CODEGRAPH.md`.
 
 ## Bootstrap de un proyecto
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import unittest
 from pathlib import Path
@@ -69,12 +70,16 @@ def record(
 ) -> dict:
     codegraph_calls = 1 if variant == "with-codegraph" else 0
     return {
+        "schema_version": 2,
         "captured_at": "2026-09-11T00:00:00+00:00",
         "experiment": "codegraph-ab",
         "pair_id": pair_id,
         "project": "higyrus",
         "variant": variant,
         "task_kind": "blast-radius",
+        "task_id": pair_id,
+        "policy_version": "policy-1",
+        "scope": {"boundary_kind": "dedicated-task-session"},
         "outcome": outcome,
         "budget": {
             "applicable": variant == "with-codegraph",
@@ -152,6 +157,55 @@ class CodeGraphMetricsTest(unittest.TestCase):
             report["quality"]["with-codegraph"]["acceptance_rate_pct"], 200 / 3
         )
         self.assertEqual(report["excluded_pairs"][0]["reason"], "resultado no aceptado")
+
+    def test_unknown_tokens_output_and_latency_are_not_zero(self) -> None:
+        message = assistant_message(tokens=100, tools=[("codegraph_explore", "completed", "x")])
+        del message["info"]["tokens"]["total"]
+        del message["parts"][0]["state"]["time"]
+        del message["parts"][0]["state"]["output"]
+        metrics = MODULE.compute_session_metrics(exported_session("s", [message]))
+        self.assertIsNone(metrics["tokens"]["total"])
+        self.assertEqual(metrics["token_coverage"]["total"]["missing"], 1)
+        self.assertIsNone(metrics["search"]["codegraph"]["output_bytes"])
+        self.assertIsNone(metrics["search"]["codegraph"]["wall_ms"])
+
+    def test_missing_one_token_observation_invalidates_field_not_other_fields(self) -> None:
+        first = assistant_message(tokens=100, tools=[])
+        second = assistant_message(tokens=200, tools=[])
+        del second["info"]["tokens"]["total"]
+        metrics = MODULE.compute_session_metrics(exported_session("s", [first, second]))
+        self.assertIsNone(metrics["tokens"]["total"])
+        self.assertEqual(metrics["tokens"]["input"], 280)
+
+    def test_overlap_does_not_double_count_active_time(self) -> None:
+        self.assertEqual(MODULE.interval_union_ms([(0, 10), (5, 15), (20, 30)]), 25)
+
+    def test_legacy_pair_excluded_and_unknown_metric_has_no_percentage(self) -> None:
+        records = [record("p", v, 100, 1) for v in MODULE.VARIANTS]
+        records[0]["schema_version"] = 1
+        self.assertEqual(MODULE.build_report(records)["complete_accepted_pairs"], 0)
+        records[0]["schema_version"] = 2
+        records[0]["metrics"]["tokens"]["total"] = None
+        report = MODULE.build_report(records)
+        self.assertIsNone(report["aggregate"]["total_tokens"]["paired_improvement_pct_median"])
+        self.assertEqual(report["aggregate"]["total_tokens"]["available_pairs"], 0)
+
+    def test_pair_rejects_policy_model_scope_and_duplicate_mismatch(self) -> None:
+        original = [record("p", v, 100, 1) for v in MODULE.VARIANTS]
+        for field, value in (("policy_version", "policy-2"), ("task_id", "other")):
+            records = copy.deepcopy(original)
+            records[0][field] = value
+            self.assertEqual(MODULE.build_report(records)["complete_accepted_pairs"], 0)
+        records = copy.deepcopy(original)
+        records[0]["metrics"]["models"]["other/model"] = 1
+        records[1]["metrics"]["models"]["other/model"] = 1
+        self.assertEqual(MODULE.build_report(records)["complete_accepted_pairs"], 0)
+        self.assertEqual(MODULE.build_report(original + [original[0]])["complete_accepted_pairs"], 0)
+
+    def test_pending_outcome_is_not_an_implicit_failure(self) -> None:
+        report = MODULE.build_report([record("p", "with-codegraph", 1, 1, outcome="pending")])
+        self.assertIsNone(report["quality"]["with-codegraph"]["acceptance_rate_pct"])
+        self.assertEqual(report["quality"]["with-codegraph"]["evaluated_runs"], 0)
 
 
 if __name__ == "__main__":

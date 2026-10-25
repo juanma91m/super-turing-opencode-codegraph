@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Métricas v2: history retrospectivo SQLite read-only, familias parent_id sin doble
+  conteo, tokens desglosados, tiempos/latencia con cobertura y null para ausentes.
+- Captura A/B por alcance explícito de tarea y política, evaluación opcional de
+  utilidad/correcciones y reporte estratificado; los pares legacy no se confunden
+  con tareas verificadas.
+- Instalación `--metrics-only` para actualizar instrumentación sin modificar runtime,
+  MCP, índices, skill, permisos ni marker. Sin cambios funcionales de CodeGraph.
+
 ## [0.1.0-alpha.2] - 2026-09-11
 
 ### Added

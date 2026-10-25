@@ -9,6 +9,7 @@ RUNTIME_DIR="${HOME}/.local/share/super-turing-opencode-codegraph/runtime"
 DRY_RUN=0
 VALIDATE=1
 ASSETS_ONLY=0
+METRICS_ONLY=0
 MANAGED_FILES=()
 
 usage() {
@@ -19,6 +20,7 @@ Options:
   --target-dir <path>    Target OpenCode config dir (default: ~/.config/opencode)
   --runtime-dir <path>   Managed CodeGraph runtime prefix
   --assets-only          Copy assets and wire an existing managed runtime
+  --metrics-only         Copy only metrics/report assets; do not touch runtime, MCP or marker
   --dry-run              Show actions without writing files
   --no-validate          Skip opencode debug config
   -h, --help             Show this help
@@ -146,6 +148,7 @@ while [[ "$#" -gt 0 ]]; do
     --target-dir) TARGET_DIR="$2"; shift 2 ;;
     --runtime-dir) RUNTIME_DIR="$2"; shift 2 ;;
     --assets-only) ASSETS_ONLY=1; shift ;;
+    --metrics-only) METRICS_ONLY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --no-validate) VALIDATE=0; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -158,6 +161,13 @@ for dependency in python3 git; do
 done
 
 load_managed_files
+if [[ "$METRICS_ONLY" -eq 1 ]]; then
+  MANAGED_FILES=(PLAYBOOK-CODEGRAPH.md commands/codegraph-benchmark.md scripts/codegraph_metrics.py scripts/codegraph_metrics.sh scripts/codegraph_telemetry.py)
+  copy_assets
+  validate_config
+  log "Metrics assets updated; runtime, MCP, permissions, skill and marker were not modified"
+  exit 0
+fi
 log "Repo dir: $REPO_DIR"
 log "Target dir: $TARGET_DIR"
 log "Runtime dir: $RUNTIME_DIR"
