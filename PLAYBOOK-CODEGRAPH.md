@@ -2,7 +2,8 @@
 
 ## Qué resuelve
 
-CodeGraph aporta evidencia estructural vigente del código:
+CodeGraph aporta evidencia estructural del índice consultado; su vigencia y
+cobertura deben corroborarse cuando afecten la conclusión:
 
 - símbolos y definiciones,
 - callers y callees,
@@ -35,12 +36,33 @@ No usarlo por reflejo para:
 - microcambios ya localizados,
 - repos sin índice.
 
+Un símbolo ya localizado puede necesitar análisis estructural si aún hay
+incertidumbre sobre callers o impacto. El tamaño/presencia del índice no decide
+por sí solo el routing. Conservar las prioridades de dominio del proyecto y la
+autoridad del rol; no ampliar tools ni permisos para seguir este procedimiento.
+
 ## Contrato de consulta
 
-- Pasar siempre `projectPath` absoluto cuando el MCP no tenga un proyecto por defecto.
-- Tratar el source devuelto como ya leído; no reabrir los mismos archivos sin una hipótesis nueva.
+- Pasar `projectPath` absoluto en cada consulta: root Git/worktree real del código,
+  incluso desde subdirectorios, no su overlay ni un default implícito. Una reference
+  hermana no crea aristas cross-repo ni autoriza indexar otro checkout.
+- Empezar por una pregunta corta sobre símbolos y una frontera de módulo/componente.
+  El mapa global sigue permitido cuando es el pedido, no como estación previa a todo
+  cambio. No inventar parámetros ni cambiar el motor para acotar la respuesta.
+- Tratar solo el fragmento realmente recibido como leído, no el archivo entero por
+  su nombre. Abrir la fuente donde falte evidencia material sin repetir todo el recorrido.
 - Confirmar con herramientas directas cualquier dato crítico que el grafo no muestre completo.
-- Si no hay índice, degradar a `glob`/`grep`/`read`; no inicializarlo autónomamente.
+- Preservar una consulta compacta del diff en review formal y normalmente hasta tres
+  en planning/implementación. No son cuotas obligatorias ni se multiplican por roots;
+  la skill del review formal conserva sus restricciones adicionales.
+- Ante falta de índice/tool/acceso, respuesta parcial o aviso de staleness/degradación,
+  declarar el límite y degradar a `glob`/`grep`/`read`; no inicializar ni reindexar por
+  cuenta propia. Una orientación sin `isError` no demuestra que hubo grafo útil.
+- No repetir argumentos ni usar CLI/otro agente para eludir restricciones. No añadir
+  `status` antes de cada consulta, reparaciones o cambios de watcher/autosync.
+- Tamaño, mtime, registro o marcadores no certifican salud del índice; configuración
+  externa y relaciones dinámicas/generadas necesitan corroboración. No usar ausencia
+  de aristas como prueba única de ausencia de impacto.
 
 ## Lifecycle
 

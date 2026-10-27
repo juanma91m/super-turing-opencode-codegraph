@@ -13,13 +13,19 @@ compatibility: opencode
 - para identificar callers/callees o blast radius,
 - para orientar revisión y selección de tests.
 
+## Elección de evidencia
+
+- Priorizar el grafo si falta una relación estructural, el índice existe y el rol tiene acceso autorizado.
+- Para un dato literal o archivo ya localizado sin incertidumbre estructural, preferir lectura directa; existencia o tamaño del índice no obligan a consultarlo.
+- Un símbolo localizado puede seguir requiriendo análisis de callers/impacto. Preservar las prioridades de dominio y contratos locales, sin ampliar permisos.
+
 ## Flujo
 
-1. Resolver el repository root absoluto.
-2. Consultar `codegraph_explore` con una pregunta corta y símbolos concretos.
-3. Pasar `projectPath` siempre que no haya default inequívoco.
-4. Tratar el source devuelto como leído.
-5. Abrir archivos adicionales solo para confirmar una hipótesis no cubierta.
+1. Resolver el root Git/worktree real y absoluto del código, no el directorio de su overlay.
+2. Consultar `codegraph_explore` con una pregunta corta, símbolos concretos y una frontera de módulo/componente; mapa global solo si es el pedido. Usar únicamente argumentos soportados por el schema anunciado.
+3. Pasar `projectPath` absoluto en cada consulta, también desde subdirectorios; no depender del default implícito.
+4. Tratar solo el fragmento realmente devuelto como leído, no el archivo entero por ver su nombre.
+5. Abrir fuente adicional donde falte evidencia material; no repetir una exploración completa ya cubierta.
 6. Contrastar findings materiales con diff, tests o lectura directa.
 
 ## Presupuesto de consultas
@@ -29,15 +35,19 @@ compatibility: opencode
 - En planning o implementación, usar normalmente hasta tres consultas: mapa inicial, una profundización y una verificación puntual.
 - Si la primera respuesta no reduce lecturas o devuelve demasiado contexto, detener el uso del grafo para esa tarea y continuar con lectura directa.
 - Las reglas locales del proyecto pueden indicar capas o contratos prioritarios, pero no deben duplicar este procedimiento completo en otra skill.
+- Son presupuestos, no cuotas: una consulta suficiente permite terminar. No multiplicarlos por cada root referenciado ni relajar el contrato del review formal.
 
 ## Fallback
 
-Si no hay índice o la tool falla:
+Si falta índice/tool/acceso, la tool falla, la respuesta es parcial o hay aviso de staleness/degradación:
 
 - explicitarlo,
 - usar `glob`/`grep`/`read`,
 - sugerir `/codegraph-init <root>` si el usuario quiere habilitarlo,
 - no inicializar ni reindexar por cuenta propia.
+- una orientación sin `isError` no prueba que hubo evidencia útil del grafo,
+- no repetir los mismos argumentos ni usar CLI u otro agente para eludir restricciones,
+- no lanzar `status` antes de cada consulta ni reparaciones automáticas; no alterar watcher/autosync configurados.
 
 ## Límites
 
@@ -45,3 +55,6 @@ Si no hay índice o la tool falla:
 - No usarlo como prueba única de ausencia de callers.
 - No guardar el output crudo del grafo en memoria durable ni Qdrant; persistir solo conclusiones estables y verificadas cuando realmente sean reusables.
 - No compartir `.codegraph/` entre worktrees.
+- Una reference no crea aristas cross-repo ni autoriza indexar otro checkout; cada consulta debe fijar su root.
+- Tamaño, mtime, registro o marcadores de daemon no certifican cobertura, compatibilidad o frescura.
+- Configuración externa y relaciones dinámicas/generadas requieren corroboración; no inventar parámetros ni cambiar el motor para acotar una consulta.

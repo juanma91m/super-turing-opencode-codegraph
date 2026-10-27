@@ -63,6 +63,20 @@ Reiniciá OpenCode después de instalar para cargar el nuevo MCP y los assets.
 
 ## Uso por proyecto
 
+El routing se decide por la pregunta: priorizar el grafo para relaciones, flujos o
+impacto estructural que aún falten, no para un dato literal ya localizado sin esa
+incertidumbre. Un símbolo localizado puede seguir requiriendo análisis de coupling.
+Conservar las prioridades locales; el tamaño del repo o del índice no obliga a
+consultarlo. El contrato común vive en la skill y el playbook, sin copiar dominio
+ni reescribir agentes por proyecto. Claude mantiene su adaptación de identificadores.
+
+Cada consulta debe pasar `projectPath` absoluto del root Git/worktree real, también
+desde un subdirectorio. Acotar símbolos/componentes y leer directamente solo lo
+que falte: el fragmento recibido no equivale al archivo entero. Ante falta de acceso,
+índice o respuesta suficiente, declarar la limitación sin bypass o reparación
+automática. Una reference no crea un grafo cross-repo. Los presupuestos no son cuotas
+ni se multiplican por root; no cambiar lifecycle, permisos o motor para cumplirlos.
+
 Inicializar o adoptar un índice:
 
 ```bash
