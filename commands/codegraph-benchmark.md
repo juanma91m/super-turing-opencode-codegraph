@@ -10,6 +10,20 @@ Operá el benchmark CodeGraph solicitado en `$ARGUMENTS` mediante:
 bash ~/.config/opencode/scripts/codegraph_metrics.sh <history|capture|report> <argumentos>
 ```
 
+Antes de lanzar sesiones, exigir una decisión concreta que el resultado pueda
+cambiar, criterio de calidad/parada, presupuesto y autorización. Empezar con
+un par exploratorio (dos sesiones) de un caso; ampliar solo si queda una duda
+decisoria. Es descriptivo: no extrapolar resultados a otros proyectos ni medir
+por obligación. Conservar contexto inicial comparable y no pasar respuestas o
+hallazgos persistidos de una variante al control.
+
+Se compara con/sin grafo, no un antes/después de políticas. Ambos registros deben
+declarar la misma `--policy-version`: no falsear etiquetas ni pedir que se acepten
+políticas distintas para obtener un porcentaje. No forzar grafo en una tarea literal.
+Si el rol no puede ejecutar el wrapper, pedir un operador compatible; no ampliar
+permisos ni delegar como bypass. No inicializar/sincronizar/reindexar para preparar
+el experimento por reflejo.
+
 Para capturar una corrida exigir siempre:
 
 - `--session <id>` explícito,
@@ -30,3 +44,11 @@ Capturar desde una sesión operadora distinta de la sesión medida para no conta
 
 Para informar resultados ejecutar `report`. Explicar que un porcentaje positivo representa mejora con CodeGraph y que solo los pares comparables con ambos resultados `accepted` alimentan el porcentaje principal.
 Datos no disponibles se muestran como n/a, no cero. Sesiones hijas se suman una sola vez por parent_id; trabajo externo o no vinculado queda desconocido. No cambiar reglas de consulta, límites, índices ni permisos al operar estas métricas.
+
+Interpretar la columna de referencia como heurística: la captura actual usa
+1 llamada para review, 3 en otros tipos y 10 KiB de salida, no límites del motor
+o de la política vigente. Los flags son los guardados al capturar, no una nueva
+evaluación de la política. JSON conserva sus claves/valores legacy por compatibilidad.
+La búsqueda observada cubre CodeGraph y glob/grep/read, no todas las lecturas por
+Bash, wrappers u otras tools. Informar calidad/correcciones y outcomes/exclusiones,
+no solo el porcentaje de pares accepted, sin cambiar los cálculos para mejorar cifras.

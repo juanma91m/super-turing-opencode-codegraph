@@ -85,9 +85,23 @@ Cada worktree representa contenido distinto y debe tener su propio `.codegraph/`
 
 ## Medición A/B
 
+Medir solo si hay una **decisión concreta** de routing/costo/calidad que el
+resultado pueda cambiar. Exigir presupuesto y autorización antes de iniciar;
+no ejecutar un benchmark por completar una casilla. Empezar con **un par exploratorio**
+(**dos sesiones**) de un caso; ampliar solo si queda una decisión sin resolver.
+Es un piloto descriptivo: no extrapolar a otros proyectos ni tratarlo como evidencia
+estadística o ahorro general. Definir aceptación y parada antes de las corridas,
+sin pasar la respuesta o los hallazgos persistidos de una variante al control.
+
 Para comprobar el beneficio, comparar pares de sesiones nuevas con igual proyecto,
 modelo, tarea y criterio de aceptación. Etiquetar una variante `with-codegraph` y la
 otra `without-codegraph` mediante `/codegraph-benchmark`.
+
+Esta comparación con/sin grafo no es un antes/después de políticas. El comparador
+exige la misma `--policy-version` en ambos registros: no falsear etiquetas para
+comparar dos políticas distintas ni cambiar la elegibilidad para forzar un porcentaje.
+Comparar versiones de política requeriría un diseño propio. No forzar una consulta
+al grafo en una tarea literal para fabricar una variante `with-codegraph`.
 
 La métrica principal es la mejora porcentual pareada de tokens totales:
 
@@ -99,6 +113,24 @@ Un valor positivo mejora; uno negativo empeora. Complementar con duración, redu
 de `glob`/`grep`/`read`, bytes de output de búsqueda, tasa de aceptación y retrabajo.
 Solo los pares donde ambas variantes fueron aceptadas cuentan para el porcentaje
 principal. No usar el error técnico cero como sustituto de calidad funcional.
+
+### Interpretación de referencias y cobertura
+
+- La captura actual registra referencias de 1 llamada en review, 3 en otros tipos
+  y **10 KiB** de salida. Son una **heurística** fija de medición, no un cap del
+  motor ni una regla derivada de la política declarada. El reporte usa los flags
+  guardados; no reevalúa la política vigente ni declara su incumplimiento.
+- Por compatibilidad, JSON conserva `recommended_max_output_bytes`,
+  `calls_compliant`, `output_compliant` y `budget_compliance_rate_pct`, sus valores
+  y cálculos. La etiqueta Markdown explicita su carácter de referencia; no tomar
+  el nombre legacy como un guardrail ni un flag negativo como motivo para retirar
+  CodeGraph o cambiar el runtime.
+- `manual_calls` y su output cubren `glob/grep/read`; la suma de búsqueda cubre
+  esas tools más CodeGraph. No incluye toda búsqueda por Bash, wrappers u otras
+  tools. Declarar esta cobertura para el rol/tarea, sin inventar datos faltantes;
+  considerar tokens totales, calidad y correcciones además de reducir llamadas.
+- Mostrar todos los outcomes y exclusiones. El porcentaje principal de pares
+  accepted no sustituye esa evaluación ni autoriza cambios si empeora la calidad.
 
 ### Contrato de métricas v2 (sin cambios en el uso del grafo)
 

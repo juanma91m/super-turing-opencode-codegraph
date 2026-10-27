@@ -609,11 +609,15 @@ def report_markdown(report: dict[str, Any]) -> str:
         f"- Pares aceptados y comparables: {report['complete_accepted_pairs']}",
         f"- Pares excluidos: {len(report['excluded_pairs'])}",
         "",
+        "Comparación con/sin grafo bajo una misma política declarada; no mide un antes/después de políticas.",
+        "Un piloto descriptivo de uno o pocos pares no permite extrapolar ahorro a otros proyectos.",
+        "",
         "## Resultado agregado",
         "",
         "Un porcentaje positivo indica mejora con CodeGraph; uno negativo indica regresión.",
         "",
         "Tokens incluyen caché y contexto repetido; no equivalen a costo facturado. n/a no significa cero.",
+        "La búsqueda observada cubre CodeGraph y glob/grep/read, no toda búsqueda por Bash, wrappers u otras tools.",
         "",
         "| Métrica | Sin CodeGraph (mediana) | Con CodeGraph (mediana) | Mejora pareada (mediana) | Pares con dato |",
         "|---|---:|---:|---:|---:|",
@@ -624,9 +628,9 @@ def report_markdown(report: dict[str, Any]) -> str:
         "assistant_wall_ms": "Tiempo de asistente (ms)",
         "assistant_active_union_ms": "Tiempo activo sin solapamientos (ms)",
         "codegraph_latency_ms": "Latencia CodeGraph por llamada (ms)",
-        "manual_calls": "Llamadas manuales",
-        "manual_output_bytes": "Output manual (bytes)",
-        "search_output_bytes": "Output total de búsqueda (bytes)",
+        "manual_calls": "Llamadas glob/grep/read",
+        "manual_output_bytes": "Output glob/grep/read (bytes)",
+        "search_output_bytes": "Output CodeGraph + glob/grep/read (bytes)",
     }
     for name, values in report["aggregate"].items():
         lines.append(
@@ -638,9 +642,13 @@ def report_markdown(report: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## Calidad y presupuesto",
+            "## Calidad y referencia heurística",
             "",
-            "| Variante | Corridas | Aceptación | Cumplimiento de presupuesto |",
+            "La referencia del capturador actual usa 1 llamada para review, 3 para otros tipos y 10 KiB de salida; no es un límite del motor ni de la política vigente.",
+            "Se muestran los flags guardados en las capturas: no se recalculan al generar este reporte ni se infieren de policy_version.",
+            "Un flag negativo no demuestra incumplimiento de la política. Evaluar también calidad, correcciones y pares excluidos.",
+            "",
+            "| Variante | Corridas | Aceptación | Referencia heurística (llamadas/salida) |",
             "|---|---:|---:|---:|",
         ]
     )

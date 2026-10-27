@@ -103,6 +103,52 @@ def record(
 
 
 class CodeGraphMetricsTest(unittest.TestCase):
+    def test_report_clarifies_comparison_reference_and_coverage_without_mutating_json(self) -> None:
+        records = [record("p", "without-codegraph", 1000, 10),
+                   record("p", "with-codegraph", 700, 4)]
+        records[1]["budget"]["output_compliant"] = False
+        report = MODULE.build_report(records)
+        original = copy.deepcopy(report)
+        text = MODULE.report_markdown(report)
+        for clause in ("con/sin grafo", "no mide un antes/después de políticas",
+                       "piloto descriptivo", "Referencia heurística (llamadas/salida)",
+                       "10 KiB", "no es un límite del motor ni de la política vigente",
+                       "no se recalculan al generar este reporte", "Llamadas glob/grep/read",
+                       "no toda búsqueda por Bash, wrappers u otras tools"):
+            self.assertIn(clause, text)
+        self.assertNotIn("| Variante | Corridas | Aceptación | Cumplimiento de presupuesto |", text)
+        self.assertEqual(report, original)
+        self.assertEqual(set(report), {"schema_version", "experiment", "generated_at", "runs_total",
+                                     "complete_accepted_pairs", "quality", "aggregate", "strata", "pairs", "excluded_pairs"})
+        self.assertEqual(report["schema_version"], 2)
+        self.assertEqual(report["quality"]["with-codegraph"]["budget_compliance_rate_pct"], 0)
+        self.assertEqual(report["aggregate"]["total_tokens"]["paired_improvement_pct_median"], 30)
+
+    def test_manual_search_coverage_does_not_silently_include_bash(self) -> None:
+        exported = exported_session("fixture", [assistant_message(tokens=100, tools=[
+            ("glob", "completed", "g"), ("read", "completed", "r"),
+            ("bash", "completed", "wrapper search output"),
+            ("codegraph_explore", "completed", "graph"),
+        ])])
+        metrics = MODULE.compute_session_metrics(exported)
+        self.assertEqual(metrics["tokens"]["total"], 100)
+        self.assertEqual(metrics["search"]["manual"]["calls"], 2)
+        self.assertEqual(metrics["search"]["codegraph"]["calls"], 1)
+        self.assertEqual(metrics["search"]["combined"]["calls"], 3)
+
+    def test_benchmark_docs_preserve_pilot_gate_and_truthful_policy_labels(self) -> None:
+        root = MODULE_PATH.parents[1]
+        for name in ("PLAYBOOK-CODEGRAPH.md", "commands/codegraph-benchmark.md"):
+            with self.subTest(document=name):
+                text = (root / name).read_text()
+                for clause in ("un par exploratorio", "dos sesiones", "decisión concreta",
+                               "antes/después", "policy-version", "10 KiB", "heurística",
+                               "Bash", "no extrapolar", "presupuesto", "autorización"):
+                    self.assertIn(clause, text)
+        playbook = (root / "PLAYBOOK-CODEGRAPH.md").read_text()
+        self.assertIn("no falsear etiquetas", playbook)
+        self.assertIn("budget_compliance_rate_pct", playbook)
+
     def test_compute_session_metrics_splits_graph_and_manual_search(self) -> None:
         exported = exported_session(
             "ses_test",
