@@ -1,5 +1,14 @@
 # super-turing-opencode-codegraph
 
+## V2 vigente — 2026-11-19
+
+Consulta MCP, lifecycle nativo y benchmark stored-history integrados en el harness
+2.2.7 activado y auditado. La disponibilidad del catálogo no certifica frescura de
+un índice. Actualizar el stack no inicializa, reindexa, comparte ni elimina índices
+de proyectos; se preserva el registry local y el consentimiento para mutadores.
+El instalador shell descrito abajo es V1. Para V2 usar la actualización coordinada
+de Core y este owner `v2/general.mjs`; no reinstalar el addon V1 sobre V2.
+
 Addon global y opcional para incorporar [CodeGraph](https://github.com/colbymchenry/codegraph) al ecosistema `super-turing-opencode` sin duplicar integración en cada proyecto.
 
 ## Responsabilidad
@@ -20,6 +29,21 @@ No es dueño de:
 - reglas de dominio de un producto,
 - índices compartidos entre repositorios o worktrees,
 - modificaciones funcionales de los proyectos indexados.
+
+## Piloto OpenCode V2 oficial
+
+La adaptación de **consulta MCP, skill y playbook** está implementada, validada y
+aplicada al workshop por el operador, que confirma Connected. Una captura posterior
+confirma skill y consulta real sobre índice existente: ejecución OK, relevancia
+parcial (recuperó un script de carga, no el entrypoint principal pedido). No se
+certifica calidad general, cobertura ni frescura del índice con ese único resultado.
+Reutiliza CodeGraph 1.5.0 y conserva Knowledge/Ticketing/Context7/libnotify. Lifecycle
+y métricas V2 no se habilitan en ese piloto; V1 no se modifica. El candidato general
+posterior ya porta cuatro comandos lifecycle explícitos por tool nativa y los prueba
+en índices temporales; benchmark history/capture/report nativo también implementado
+y probado con métricas derivadas versionadas, sólo fixtures. Ver
+[v2/TELEMETRY-DESIGN.md](v2/TELEMETRY-DESIGN.md), [v2/NATIVE-LIFECYCLE.md](v2/NATIVE-LIFECYCLE.md) y
+[v2/README.md](v2/README.md) para permisos, efectos, pruebas y aplicación opt-in.
 
 ## Modelo de despliegue
 

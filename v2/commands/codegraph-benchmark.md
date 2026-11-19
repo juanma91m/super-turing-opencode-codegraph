@@ -1,0 +1,13 @@
+---
+description: Lee historia o captura/compara una tarea CodeGraph explícita por API V2 sin guardar contenido crudo.
+agent: code-inspector
+---
+Operá sólo el benchmark solicitado en $ARGUMENTS mediante la tool codegraph-benchmark, no shell/SQL/export V1. No inventar session IDs; obtenerlos por metadata o pedirlos. No lanzar sesiones A/B, modelos o índices sin decisión concreta, presupuesto y autorización; nada de indexar por preparar un experimento.
+
+Mapeo de flags de referencia a input tipado: history requiere since/until (UTC inclusivo/exclusivo), model opcional, scope del directorio actual. capture requiere sessionID (--session), variant, pairID, project (LABEL, no path completo), taskKind, policyVersion, outcome, y dedicatedTask:true o ambos fromMessage/toMessage (sin dedicatedTask). taskID opcional; utility/correctionsRequired son evaluación explícita, no inferencia. Operador fuera de familia medida. report opcional format json|markdown; sólo store metadata V2, legacy no importado.
+
+Conservar permisos nativos de lectura/captura y external_directory para roots externos. Cuerpos pueden materializarse sólo dentro del servidor para proyección; jamás devolver/guardar prompts/razonamiento/argumentos/outputs/checkpoints crudos. No adjuntar documentos o código como labels. No pasar respuestas de una variante al control ni falsear outcome/policy-version. Pares aceptados exigen mismas dimensiones/alcance/measurement, sin duplicados por variante.
+
+Requiere launcher propio con transporte público privado en RAM; si falta, detenerse sin buscar servidor/auth/DB ajenos. Forks y reverts activos no se capturan como gasto nuevo; compaction completada e hijos parentID se cuentan una vez. complete sólo describe enumeración observable, nunca historial borrado, trabajo externo o no enlazado. Una familia ambigua/cambiante puede detener history en vez de entregar un agregado parcial.
+
+V2 total significa SUMA DERIVADA de componentes normalizados exclusivos (input, output, reasoning, cache read/write), NO el total reportado del proveedor V1 ni costo facturado. El total reportado queda n/a; datos ausentes no son cero. No mezclar pares V1/V2 o distintas mediciones. Bytes son ToolContent almacenado serializado, no tokens visibles. Preservar referencias heurísticas 1 llamada review/3 otros y10KiB sin convertirlas en cuotas del motor. History es observacional por familia, no tarea ni ahorro causal. Como en V1, una captura explícita de la misma identidad actualiza atómicamente ese registro, por ejemplo para corregir outcome/utilidad/correcciones; no crea una corrida duplicada ni se refresca sola al generar report. Reportar outcomes/exclusiones/cobertura/faltantes y límites de atribución, no sólo porcentaje.
