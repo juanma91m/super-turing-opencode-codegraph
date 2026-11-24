@@ -40,7 +40,7 @@ test('official native capture/report/history use stored public pages and persist
   });
   await new Promise(resolve => mock.listen(0, '127.0.0.1', resolve));
   try {
-    const serverFixture = { type: 'local', command: [process.execPath, new URL('../../../opencode-stack/migrations/v2/fixtures/general-addon-mcp.mjs', import.meta.url).pathname], environment: { FIXTURE_TOOLS: '["codegraph_explore"]', FIXTURE_LOG: path.join(root, 'graph-calls.jsonl') }, codemode: false };
+    const serverFixture = { type: 'local', command: [process.execPath, new URL('../../../opencode-stack/v2/testing/fixtures/general-addon-mcp.mjs', import.meta.url).pathname], environment: { FIXTURE_TOOLS: '["codegraph_explore"]', FIXTURE_LOG: path.join(root, 'graph-calls.jsonl') }, codemode: false };
     const p = prepareGeneral(path.join(root, 'profile'), { project, mock: 'http://127.0.0.1:' + mock.address().port + '/v1', contributions: [codegraphContribution({ binding: { runtime_home: home, runtime_bin: '/fixture/not-used' }, server: serverFixture })], plugins: [control] });
     server = await startOwnedServer(officialRuntime(path.join(os.homedir(), '.local/share/opencode-v2-clean')).binary, p, generalEnvironment);
     const execute = async (kind, agent = 'master-dev', permissions = []) => {

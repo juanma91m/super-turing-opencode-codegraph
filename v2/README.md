@@ -104,13 +104,9 @@ aislamiento de entorno y preservación de tuning explícito.
 
 Desde opencode-stack:
 
-```bash
-KNOWLEDGE_API_NATIVE=1 node --test migrations/v2/test/*.test.mjs
-node migrations/v2/smoke-codegraph.mjs
-node migrations/v2/smoke-ticketing.mjs
-node migrations/v2/smoke-ticketing-oauth.mjs
-node migrations/v2/codegraph.mjs plan
-```
+
+Usá la entrada gestionada con el addon configurado; ver [Core](https://github.com/juanma91m/super-turing-opencode/blob/main/v2/install/README.md).
+
 
 - **71 tests de migración** pasaron, incluyendo API nativa y upgrade/reapertura.
 - **23 casos nativos CodeGraph**: cinco actores permitidos, diez denegados, roots
@@ -130,10 +126,9 @@ node migrations/v2/codegraph.mjs plan
 Cerrar primero el cliente del workshop V2, no producción V1. `--client-closed` es
 confirmación humana, no detección automática ni autorización para matar procesos.
 
-```bash
-node "$HOME/.local/src/opencode-stack/migrations/v2/codegraph.mjs" apply --client-closed
-node "$HOME/.local/src/opencode-stack/migrations/v2/codegraph.mjs" chat
-```
+
+Usá la entrada gestionada con el addon configurado; ver [Core](https://github.com/juanma91m/super-turing-opencode/blob/main/v2/install/README.md).
+
 
 Si apply falla, detenerse; no repetir instaladores ni indexar para corregirlo.
 La actualización compara el lote conocido antes de reemplazar, hace backups
