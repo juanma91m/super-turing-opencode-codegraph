@@ -6,8 +6,9 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { CODEGRAPH_TOOL, CODEGRAPH_ROLES, enableCodeGraph } from './config.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
+const pin = JSON.parse(fs.readFileSync(path.join(root, 'CODEGRAPH-MANIFEST.json'))).nativeV2.version;
 
-export function codegraphContribution({ binding, server, maintenanceRegistry }) {
+export function codegraphContribution({ binding, server, maintenanceRegistry, serverVersion }) {
   return { id: 'codegraph', apply(ctx) {
     assert(ctx.version === 1 && ctx.kind === 'general' && path.isAbsolute(binding.runtime_home));
     const indexDir = binding.environment?.CODEGRAPH_DIR ?? '.codegraph';
@@ -38,14 +39,17 @@ export function codegraphContribution({ binding, server, maintenanceRegistry }) 
     for (const [file, bytes] of Object.entries(benchmarkAssets)) { ctx.addConfig(file, bytes); benchmarkPins[path.join(ctx.config, file)] = createHash('sha256').update(bytes).digest('hex'); }
     for (const id of statusActors) ctx.agents[id].permissions.push({ action: 'codegraph-benchmark', resource: '*', effect: 'allow' }, { action: 'codegraph-benchmark-read', resource: '*', effect: 'ask' }, { action: 'codegraph-benchmark-capture', resource: '*', effect: 'ask' });
     ctx.addConfig('commands/codegraph-benchmark.md', ctx.readAsset(path.join(root, 'v2/commands/codegraph-benchmark.md')));
-    const selected = server ?? { type: 'local', command: ['/usr/bin/python3', path.join(ctx.config, 'scripts/codegraph_runtime.py'), 'mcp'], cwd: ctx.paths.cache, codemode: false };
+    const selected = server ?? { type: 'local', command: ['/usr/bin/python3', '-B', path.join(ctx.config, 'scripts/codegraph_runtime.py'), 'mcp'], cwd: ctx.paths.cache, codemode: false };
     if (!server) for (let current = ctx.paths.cache;; current = path.dirname(current)) {
       assert(!fs.existsSync(path.join(current, indexDir, 'codegraph.db')), 'CodeGraph host cwd has an index ancestor; choose a neutral candidate root');
       if (path.dirname(current) === current) break;
     }
     Object.assign(ctx.document, enableCodeGraph(ctx.document, selected));
     ctx.copyBundleTree('codegraph', path.join(root, 'v2/plugins/access'), 'v2/plugins/access');
-    ctx.document.plugins.push({ package: ctx.bundlePath('codegraph', 'v2/plugins/access'), options: { tool: CODEGRAPH_TOOL, runtimeHome: binding.runtime_home, indexDir, maintenance: { script, pins, statusActors, writeActors }, benchmark: { script: path.join(ctx.config, 'scripts/codegraph_benchmark_v2.py'), pins: benchmarkPins, directory: path.join(binding.runtime_home, '.local/state/super-turing-opencode-codegraph/benchmarks-v2'), actors: statusActors } } });
+    ctx.document.plugins.push({ package: ctx.bundlePath('codegraph', 'v2/plugins/access'), options: { tool: CODEGRAPH_TOOL, runtimeHome: binding.runtime_home, indexDir,
+      ...(!server ? { compatibility: { script, pins } } : {}),
+      maintenance: { script, pins, statusActors, writeActors },
+      benchmark: { script: path.join(ctx.config, 'scripts/codegraph_benchmark_v2.py'), pins: benchmarkPins, directory: path.join(binding.runtime_home, '.local/state/super-turing-opencode-codegraph/benchmarks-v2'), actors: statusActors, codegraphVersion: server ? serverVersion ?? null : pin } } });
     ctx.closeTools('codegraph_*', [CODEGRAPH_TOOL]);
     ctx.closeTools('codegraph-project', ['codegraph-project']);
     ctx.closeTools('codegraph-benchmark', ['codegraph-benchmark']);

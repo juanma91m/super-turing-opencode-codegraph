@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { nativeMessages } from './native-messages.mjs';
 
 export const MEASUREMENT = Object.freeze({ backend: 'opencode-public-api-2.2.7', tokens: 'normalized-exclusive-component-sum-v1', bytes: 'stored-tool-content-json-utf8-v1', history: 'stored-assistant-plus-completed-compaction-v1' });
+const versionLabel = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$/.test(value) ? value : null;
 const sid = value => typeof value === 'string' && /^ses_[A-Za-z0-9]+$/.test(value);
 const mid = value => typeof value === 'string' && /^msg_[A-Za-z0-9]+$/.test(value);
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -203,7 +204,8 @@ export async function executeBenchmark(ctx, input, context, messages = nativeMes
     const maxCalls = /review/i.test(input.taskKind) ? 1 : 3;
     const record = validateRecord({ schema_version: 3, experiment: 'codegraph-ab', captured_at: new Date().toISOString(), measurement: MEASUREMENT, pair_id: input.pairID, project: input.project, variant: input.variant, task_kind: input.taskKind,
       task_id: input.taskID ? label(input.taskID) : input.pairID, policy_version: input.policyVersion, scope: collected.scope, outcome: input.outcome, evaluation: { utility: input.utility ?? 'not-evaluated', corrections_required: input.correctionsRequired ?? null, source: 'explicit-operator-input' },
-      runtime: { codegraph_version: '1.5.0', opencode_version: '2.2.7' }, runtime_provenance: 'declared candidate pin at capture; NOT historical session runtime', budget: { applicable: input.variant === 'with-codegraph', recommended_max_calls: maxCalls, recommended_max_output_bytes: 10240, calls_compliant: input.variant === 'with-codegraph' ? graph.calls <= maxCalls : null, output_compliant: input.variant === 'with-codegraph' && graph.output_bytes !== null ? graph.output_bytes <= 10240 : null }, metrics: metric });
+      runtime: { codegraph_version: versionLabel(ctx.options.benchmark.codegraphVersion), opencode_version: versionLabel(ctx.app?.version) },
+      runtime_provenance: 'configured binding at capture; historical execution version unknown', budget: { applicable: input.variant === 'with-codegraph', recommended_max_calls: maxCalls, recommended_max_output_bytes: 10240, calls_compliant: input.variant === 'with-codegraph' ? graph.calls <= maxCalls : null, output_compliant: input.variant === 'with-codegraph' && graph.output_bytes !== null ? graph.output_bytes <= 10240 : null }, metrics: metric });
     const id = hash(JSON.stringify([input.pairID, input.variant, input.sessionID, input.taskID ?? input.pairID, input.fromMessage, input.toMessage]));
     await ask('codegraph-benchmark-capture', ['store:' + directory, 'record:' + id]); context.signal?.throwIfAborted();
     await recheckFamily(ctx, collected.catalog, context.signal);
@@ -220,7 +222,8 @@ export async function executeBenchmark(ctx, input, context, messages = nativeMes
       fs.renameSync(temporary, target);
       const folderFD = fs.openSync(folder, 'r'); try { fs.fsyncSync(folderFD); } finally { fs.closeSync(folderFD); }
     } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); fs.rmdirSync(stage); }
-    return { status: 'captured', recordID: id, measurement: MEASUREMENT, metrics: metric, scope: collected.scope, evaluation: record.evaluation, legacyRecordsImported: false };
+    return { status: 'captured', recordID: id, measurement: MEASUREMENT, metrics: metric, scope: collected.scope, evaluation: record.evaluation,
+      captureRuntime: record.runtime, historicalRuntimeVerified: false, legacyRecordsImported: false };
   }
   assert(input.action === 'history', 'Closed benchmark action required');
   const since = timestamp(input.since), until = timestamp(input.until); assert(since < until, 'Explicit valid since/until UTC window required');

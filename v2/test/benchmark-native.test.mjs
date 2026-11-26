@@ -7,8 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { codegraphContribution } from '../general.mjs';
 import { prepareGeneral, generalEnvironment } from '../../../opencode-stack/v2/general/profile.mjs';
-import { officialRuntime } from '../../../opencode-stack/v2/general/lifecycle.mjs';
+import { npmRuntime } from '../../../opencode-stack/v2/general/npm-runtime.mjs';
 import { startOwnedServer, until } from '../../../opencode-stack/v2/general/owned-server.mjs';
+import { withheld } from '../plugins/access/output-guard.mjs';
 
 const unpack = value => { if (typeof value === 'string') { try { return unpack(JSON.parse(value)); } catch { return value; } } if (Array.isArray(value)) return unpack(value[0]); if (value?.text !== undefined) return unpack(value.text); if (value?.content !== undefined && !value.error) return unpack(value.content); return value; };
 test('official native capture/report/history use stored public pages and persist metadata only, without extra inference or raw body transport', async t => {
@@ -21,7 +22,11 @@ test('official native capture/report/history use stored public pages and persist
   const mock = http.createServer(async (request, response) => {
     try {
       let raw = ''; for await (const chunk of request) raw += chunk;
-      const body = JSON.parse(raw), kind = JSON.stringify(body.messages.filter(row => row.role === 'user').at(-1)).match(/BCASE_([A-Z_]+)/)?.[1]; assert(kind); requestCount++;
+      const body = JSON.parse(raw), user = JSON.stringify(body.messages.filter(row => row.role === 'user').at(-1));
+      const linkedResume = user?.includes('<background-result') && user.includes('Synthetic linked child');
+      const kind = linkedResume ? 'LINKED_RESUME' : user?.match(/BCASE_([A-Z_]+)/)?.[1];
+      assert(kind, 'Unexpected synthetic model turn');
+      requestCount++;
       const outputs = body.messages.filter(row => row.role === 'tool' && row.tool_call_id?.startsWith(kind + '_'));
       let call;
       if (kind === 'WITH' && outputs.length === 0) call = ['codegraph_codegraph_explore', { projectPath: project, query: 'Synthetic relationship only' }];
@@ -40,9 +45,28 @@ test('official native capture/report/history use stored public pages and persist
   });
   await new Promise(resolve => mock.listen(0, '127.0.0.1', resolve));
   try {
-    const serverFixture = { type: 'local', command: [process.execPath, new URL('../../../opencode-stack/v2/testing/fixtures/general-addon-mcp.mjs', import.meta.url).pathname], environment: { FIXTURE_TOOLS: '["codegraph_explore"]', FIXTURE_LOG: path.join(root, 'graph-calls.jsonl') }, codemode: false };
-    const p = prepareGeneral(path.join(root, 'profile'), { project, mock: 'http://127.0.0.1:' + mock.address().port + '/v1', contributions: [codegraphContribution({ binding: { runtime_home: home, runtime_bin: '/fixture/not-used' }, server: serverFixture })], plugins: [control] });
-    server = await startOwnedServer(officialRuntime(path.join(os.homedir(), '.local/share/opencode-v2-clean')).binary, p, generalEnvironment);
+    // The marker originates only in the synthetic MCP output, not in a tool
+    // argument or the session prompt. This checks the pre-persistence boundary.
+    const mcpFixture = `
+      import fs from 'node:fs';
+      import { createInterface } from 'node:readline';
+      for await (const line of createInterface({ input: process.stdin })) {
+        const { id, method, params } = JSON.parse(line);
+        if (id === undefined) continue;
+        let result = {};
+        if (method === 'initialize') result = { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'Synthetic fixture', version: '1' } };
+        if (method === 'tools/list') result = { tools: [{ name: 'codegraph_explore', inputSchema: { type: 'object', additionalProperties: true } }] };
+        if (method === 'tools/call') {
+          fs.appendFileSync(process.env.FIXTURE_LOG, 'call\\n');
+          result = { content: [{ type: 'text', text: '-----BEGIN PRIVATE KEY----- SYNTHETIC_FILTER_WITNESS' }] };
+        }
+        console.log(JSON.stringify({ jsonrpc: '2.0', id, result }));
+      }
+    `;
+    const serverFixture = { type: 'local', command: [process.execPath, '--input-type=module', '-e', mcpFixture], environment: { FIXTURE_LOG: path.join(root, 'graph-calls.jsonl') }, codemode: false };
+    const p = prepareGeneral(path.join(root, 'profile'), { project, mock: 'http://127.0.0.1:' + mock.address().port + '/v1', contributions: [codegraphContribution({ binding: { runtime_home: home, runtime_bin: '/fixture/not-used' }, server: serverFixture, serverVersion: '1.6.4' })], plugins: [control] });
+    const runtime = npmRuntime(path.join(os.homedir(), '.local/share/opencode-v2-clean'));
+    server = await startOwnedServer(runtime.binary, p, generalEnvironment);
     const execute = async (kind, agent = 'master-dev', permissions = []) => {
       const created = await server.request('POST', '/api/session', { agent, title: 'Synthetic ' + kind, location: { directory: project }, model: { providerID: 'workshop-mock', id: 'mock' }, permissions }); assert.equal(created.status, 200); const id = created.value.data.id;
       if (!kind.startsWith('OP_')) measured[kind] = id;
@@ -50,9 +74,13 @@ test('official native capture/report/history use stored public pages and persist
       await until(async () => { if (providerError) throw new Error(providerError); const result = await server.request('GET', '/api/session/' + id + '/context'); return trace.get(kind)?.finished && result.value?.data?.at(-1)?.type === 'idle'; }, kind, 30000);
       return trace.get(kind).outputs;
     };
-    await execute('WITH'); await execute('WITHOUT');
+    const [filtered] = await execute('WITH'); await execute('WITHOUT');
+    assert.equal(filtered, withheld);
+    const rows = (await server.request('GET', '/api/session/' + measured.WITH + '/message?type=assistant')).value.data;
+    assert(JSON.stringify(rows).includes(withheld)); assert(!JSON.stringify(rows).includes('SYNTHETIC_FILTER_WITNESS'));
     const permissions = [{ action: 'codegraph-benchmark-read', resource: '*', effect: 'allow' }, { action: 'codegraph-benchmark-capture', resource: '*', effect: 'allow' }];
     const withRecord = (await execute('OP_WITH', 'code-inspector', permissions))[0]; assert(!withRecord.error, 'Native capture failed: ' + JSON.stringify(withRecord)); assert.equal(withRecord.status, 'captured'); assert.equal(withRecord.metrics.tokens.total, 354); assert.equal(withRecord.metrics.tokens.reported_total, null);
+    assert.equal(withRecord.captureRuntime.codegraph_version, '1.6.4'); assert.match(withRecord.captureRuntime.opencode_version, /^\d+\.\d+\.\d+/); assert.equal(withRecord.historicalRuntimeVerified, false);
     const without = (await execute('OP_WITHOUT', 'code-inspector', permissions))[0]; assert.equal(without.metrics.tokens.total, 236);
     const report = (await execute('OP_REPORT', 'code-inspector', permissions))[0]; assert.equal(report.complete_accepted_pairs, 1); assert(report.aggregate.total_tokens.paired_improvement_pct_median < 0, 'Graph costs more in this fixture; report must not manufacture savings');
     const history = (await execute('OP_HISTORY', 'code-inspector', permissions))[0]; assert.equal(history.causalSavings, false); assert.equal(history.families, 2);
@@ -85,8 +113,12 @@ test('official native capture/report/history use stored public pages and persist
     const child = await server.request('POST', '/api/session', { agent: 'master-dev', parentID: measured.WITHOUT, title: 'Synthetic linked child', location: { directory: project }, model: { providerID: 'workshop-mock', id: 'mock' } }); assert.equal(child.status, 200); assert.equal(child.value.data.parentID, measured.WITHOUT);
     await server.request('POST', '/api/session/' + child.value.data.id + '/prompt', { text: 'BCASE_CHILD\nSynthetic linked work.' });
     await until(async () => trace.get('CHILD')?.finished && (await server.request('GET', '/api/session/' + child.value.data.id + '/context')).value.data.at(-1)?.type === 'idle', 'Linked synthetic child');
+    // Managed releases with completion delivery can resume the parent once
+    // with a synthetic background-result. Account for that real mock turn.
+    if (Number(runtime.version.split('.')[1]) >= 4) await until(async () => trace.get('LINKED_RESUME')?.finished &&
+      (await server.request('GET', '/api/session/' + measured.WITHOUT + '/context')).value.data.at(-1)?.type === 'idle', 'Linked parent continuation');
     operations.set('OP_CHILD', { ...captured, sessionID: measured.WITHOUT, variant: 'without-codegraph', pairID: 'linked-child' });
-    const family = (await execute('OP_CHILD', 'code-inspector', permissions))[0]; assert(!family.error); assert.equal(family.metrics.tokens.total, 354); assert.equal(family.scope.linked_sessions.length, 2);
+    const family = (await execute('OP_CHILD', 'code-inspector', permissions))[0]; assert(!family.error); assert.equal(family.metrics.tokens.total, 354 + (trace.has('LINKED_RESUME') ? 118 : 0)); assert.equal(family.scope.linked_sessions.length, 2);
     const end = (await server.request('GET', '/api/session/' + measured.WITHOUT + '/message?type=assistant&order=asc')).value.data[0].id;
     operations.set('OP_RANGE', { ...captured, sessionID: measured.WITHOUT, variant: 'without-codegraph', pairID: 'native-range', dedicatedTask: undefined, fromMessage: boundary, toMessage: end });
     const range = (await execute('OP_RANGE', 'code-inspector', permissions))[0]; assert(!range.error, JSON.stringify(range)); assert.equal(range.metrics.tokens.total, 118); assert.equal(range.metrics.search.manual.calls, 1, 'Native exact range clips later child work');
@@ -95,7 +127,7 @@ test('official native capture/report/history use stored public pages and persist
     const finalHistory = (await execute('OP_FINAL_HISTORY', 'code-inspector', permissions))[0]; assert(!finalHistory.error); assert.equal(finalHistory.families, 2); assert(finalHistory.excluded.some(row => row.reason === 'active-forked-or-reverted-family'));
     operations.set('OP_FINAL_REPORT', { action: 'report' });
     const frozen = (await execute('OP_FINAL_REPORT', 'code-inspector', permissions))[0]; assert.equal(frozen.complete_accepted_pairs, 1); assert.equal(frozen.pairs[0].values.total_tokens.with_codegraph, 354); assert.equal(frozen.pairs[0].values.total_tokens.without_codegraph, 236, 'Later source changes do not silently rewrite capture counters');
-    assert.equal(requestCount, 33, 'Only explicit synthetic task/operator turns, no hidden benchmark inference');
+    assert.equal(requestCount, 33 + Number(trace.has('LINKED_RESUME')), 'Only synthetic task/operator and native completion turns, no hidden benchmark inference');
     for (const name of fs.readdirSync(directory)) assert(!/PRIVATE_COMPACTION_SUMMARY|MEASURED_BODY_MUST_NOT_LEAVE_PROJECTION/.test(fs.readFileSync(path.join(directory, name), 'utf8')));
   } finally { await server?.close(); mock.closeAllConnections(); await new Promise(resolve => mock.close(resolve)); }
 });

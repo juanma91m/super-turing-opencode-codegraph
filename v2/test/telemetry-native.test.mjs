@@ -6,10 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { prepareGeneral, generalEnvironment } from '../../../opencode-stack/v2/general/profile.mjs';
-import { officialRuntime } from '../../../opencode-stack/v2/general/lifecycle.mjs';
+import { npmRuntime } from '../../../opencode-stack/v2/general/npm-runtime.mjs';
 import { startOwnedServer, until } from '../../../opencode-stack/v2/general/owned-server.mjs';
 
-test('public2.2.7 stored assistant history paginates; stats aggregate and public usage has no reported total/projection', async t => {
+test('native stored assistant history paginates; stats aggregate and public usage has no reported total/projection', async t => {
   const root = fs.mkdtempSync('/tmp/opencode/codegraph-telemetry-contract-'); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const project = path.join(root, 'project'), control = path.join(root, 'control'); fs.mkdirSync(project); fs.mkdirSync(control);
   fs.writeFileSync(path.join(project, 'fixture.txt'), 'SYNTHETIC_TOOL_BODY_NOT_METRICS\n');
@@ -32,7 +32,7 @@ test('public2.2.7 stored assistant history paginates; stats aggregate and public
   await new Promise(resolve => mock.listen(0, '127.0.0.1', resolve)); let server;
   try {
     const p = prepareGeneral(path.join(root, 'profile'), { project, mock: 'http://127.0.0.1:' + mock.address().port + '/v1', plugins: [control] });
-    server = await startOwnedServer(officialRuntime(path.join(os.homedir(), '.local/share/opencode-v2-clean')).binary, p, generalEnvironment);
+    server = await startOwnedServer(npmRuntime(path.join(os.homedir(), '.local/share/opencode-v2-clean')).binary, p, generalEnvironment);
     const spec = (await server.request('GET', '/openapi.json')).value;
     const messages = spec.paths['/api/session/{sessionID}/message'].get;
     assert.equal(messages.operationId, 'session.message.list');

@@ -25,18 +25,19 @@ class V2ContractTests(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.runtime = load('codegraph_runtime', ROOT / 'v2/runtime.py')
         self.selector = load('codegraph_selector', ROOT / 'v2/selected-runtime.py')
-        prefix = self.home / '.local/share/super-turing-opencode-codegraph/runtime/node_modules'
+        prefix = self.home / '.local/share/super-turing-opencode-codegraph/runtime-v2-1.6.4/node_modules'
         self.binary = prefix / '.bin/codegraph'
         self.binary.parent.mkdir(parents=True)
         self.binary.write_text('#!/bin/sh\nexit 99\n')
         self.binary.chmod(0o700)
         package = prefix / '@colbymchenry/codegraph/package.json'
         package.parent.mkdir(parents=True)
-        package.write_text(json.dumps({'version': '1.5.0'}))
+        package.write_text(json.dumps({'version': '1.6.4'}))
         self.binding = {'runtime_home': str(self.home), 'runtime_bin': str(self.binary)}
         self.config = self.home / '.config/opencode'
         self.config.mkdir(parents=True)
-        self.source = {'mcp': {'codegraph': self.selector.wiring.expected_mcp(str(self.binary)), 'other': {'headers': {'Authorization': 'FIXTURE_NOT_FOR_OUTPUT'}}},
+        legacy = self.home / '.local/share/super-turing-opencode-codegraph/runtime/node_modules/.bin/codegraph'
+        self.source = {'mcp': {'codegraph': self.selector.wiring.expected_mcp(str(legacy)), 'other': {'headers': {'Authorization': 'FIXTURE_NOT_FOR_OUTPUT'}}},
                        'tools': {'codegraph_*': False}, 'agent': {role: {'tools': {'codegraph_*': True}} for role in self.selector.wiring.AGENTS}}
 
     def save(self):
@@ -46,6 +47,7 @@ class V2ContractTests(unittest.TestCase):
         self.save()
         value = self.selector.select(str(self.home), str(self.config))
         self.assertEqual(value['binding'], self.binding)
+        self.assertEqual(value['version'], json.loads((ROOT / 'CODEGRAPH-MANIFEST.json').read_text())['nativeV2']['version'])
         self.assertEqual(len(value['roles']), 5)
         self.assertNotIn('FIXTURE_NOT_FOR_OUTPUT', json.dumps(value))
         self.assertFalse((self.home / '.codegraph').exists())
@@ -75,6 +77,14 @@ class V2ContractTests(unittest.TestCase):
         self.binary.unlink()
         with self.assertRaises(ValueError): self.runtime.validate(self.binding)
         self.assertFalse(self.binary.exists())
+
+    def test_runtime_refuses_implicit_startup_index(self):
+        neutral = self.home / 'neutral'; neutral.mkdir()
+        with patch.object(Path, 'cwd', return_value=neutral):
+            self.runtime.require_neutral_cwd('.codegraph-alt')
+            (self.home / '.codegraph-alt').mkdir()
+            with self.assertRaisesRegex(ValueError, 'index ancestor'):
+                self.runtime.require_neutral_cwd('.codegraph-alt')
 
     def test_selection_preserves_explicit_watch_tuning_without_inheriting_arbitrary_values(self):
         self.save()

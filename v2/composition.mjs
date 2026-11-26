@@ -48,11 +48,23 @@ export function codegraphExtension({ binding, server } = {}) {
     }
     tree(skill, 'skills/codegraph-analisis-estructural');
     add('PLAYBOOK-CODEGRAPH.md', read(path.join(root, 'PLAYBOOK-CODEGRAPH.md')).toString('utf8').replaceAll('`codegraph_explore`', `\`${CODEGRAPH_TOOL}\``));
-    add('scripts/codegraph_runtime.py', read(path.join(root, 'v2/runtime.py')));
+    const runtimeAsset = read(path.join(root, 'v2/runtime.py'));
+    add('scripts/codegraph_runtime.py', runtimeAsset);
     add('scripts/codegraph-runtime.json', JSON.stringify(binding, null, 2) + '\n');
-    const selected = server ?? { type: 'local', command: ['/usr/bin/python3', path.join(config, 'scripts/codegraph_runtime.py'), 'mcp'], codemode: false };
+    const compatibility = (() => {
+      if (server) return {};
+      const script = path.join(config, 'scripts/codegraph_project_v2.py');
+      const paths = {
+        'scripts/codegraph_project_v2.py': read(path.join(root, 'v2/project.py')),
+        'scripts/codegraph-maintenance.json': JSON.stringify({ binding, registry: path.join(binding.runtime_home, '.local/state/super-turing-opencode-codegraph/projects.json') }),
+      };
+      const pins = { [path.join(config, 'scripts/codegraph_runtime.py')]: digest(runtimeAsset) };
+      for (const [relative, bytes] of Object.entries(paths)) { add(relative, bytes); pins[path.join(config, relative)] = digest(bytes); }
+      return { compatibility: { script, pins } };
+    })();
+    const selected = server ?? { type: 'local', command: ['/usr/bin/python3', '-B', path.join(config, 'scripts/codegraph_runtime.py'), 'mcp'], cwd: config, codemode: false };
     const next = enableCodeGraph(document, selected);
-    next.plugins.push({ package: access, options: { tool: CODEGRAPH_TOOL, runtimeHome: binding.runtime_home, indexDir } });
+    next.plugins.push({ package: access, options: { tool: CODEGRAPH_TOOL, runtimeHome: binding.runtime_home, indexDir, ...compatibility } });
     const boundary = next.plugins.find(plugin => typeof plugin === 'object' && plugin.package.endsWith('/workshop-guard/'));
     assert(boundary, 'Expected additive workshop boundary');
     boundary.options.additionalTools = [...(boundary.options.additionalTools ?? []), CODEGRAPH_TOOL];

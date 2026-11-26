@@ -3,7 +3,7 @@
 ## Estado y frontera
 
 Portados **cuatro comandos** al candidato OpenCode oficial2.2.7, conservando el
-runtime CodeGraph1.5.0: init, status, sync y reindex explícito. No instalados en el
+runtime CodeGraph (pin V2 vigente en el [README](README.md)): init, status, sync y reindex explícito. No instalados en el
 perfil real. V1/workshop, índices reales, estados y configuración del operador no
 se modificaron; no hubo init/sync/reindex real sobre sus repos.
 

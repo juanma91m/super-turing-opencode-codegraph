@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
-function integrity(pins) {
+export function integrity(pins) {
   for (const [file, digest] of Object.entries(pins)) {
     for (let current = file; current !== path.dirname(current); current = path.dirname(current)) assert(!fs.lstatSync(current).isSymbolicLink(), 'CodeGraph maintenance asset symlink refused');
     assert(createHash('sha256').update(fs.readFileSync(file)).digest('hex') === digest, 'Trusted CodeGraph maintenance asset changed');

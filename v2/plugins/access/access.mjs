@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { registerProjectTool } from './project.mjs';
+import { integrity, registerProjectTool } from './project.mjs';
 import { registerBenchmarkTool } from './benchmark.mjs';
+import { guardExploreResult } from './output-guard.mjs';
 
 export function checkProject(input, options, runner = spawnSync) {
   const root = input?.projectPath;
@@ -31,6 +32,21 @@ export async function register(ctx) {
   if (ctx.options.maintenance) await registerProjectTool(ctx);
   if (ctx.options.benchmark) await registerBenchmarkTool(ctx);
   await ctx.tool.hook('execute.before', event => {
-    if (event.tool === ctx.options.tool) checkProject(event.input, ctx.options);
+    if (event.tool !== ctx.options.tool) return;
+    checkProject(event.input, ctx.options);
+    if (ctx.options.compatibility) checkCompatibility(event.input.projectPath, ctx.options, ctx.location.directory);
   });
+  await ctx.tool.hook('execute.after', event => guardExploreResult(event, ctx.options.tool));
+}
+
+export function checkCompatibility(root, options, cwd, runner = spawnSync) {
+  const { script, pins } = options.compatibility;
+  integrity(pins);
+  const env = { PATH: '/usr/bin:/bin', HOME: options.runtimeHome, PYTHONDONTWRITEBYTECODE: '1' };
+  if (process.env.OPENCODE_CODEGRAPH_ALLOW_TEMP === '1') env.OPENCODE_CODEGRAPH_ALLOW_TEMP = '1';
+  const result = runner('/usr/bin/python3', ['-B', script, '--query-index'], {
+    cwd, env, input: JSON.stringify({ action: 'status', projectRoot: root }), timeout: 16000, maxBuffer: 8192,
+  });
+  if (result.error || result.status !== 0)
+    throw new Error('CodeGraph: incompatible index or protected source names; no automatic migration or rebuild');
 }

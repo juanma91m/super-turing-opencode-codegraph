@@ -24,10 +24,10 @@ function fake(directory) {
 function fixture(t) {
   const root = fs.mkdtempSync('/tmp/opencode/graph-benchmark-'); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const directory = path.join(root, 'project'), home = path.join(root, 'runtime-home'); fs.mkdirSync(directory); fs.mkdirSync(home);
-  const p = prepareGeneral(path.join(root, 'profile'), { project: directory, mock: 'http://127.0.0.1:1/v1', contributions: [codegraphContribution({ binding: { runtime_home: home, runtime_bin: '/fixture/not-started' }, server: { type: 'local', command: ['/fixture/not-started'], disabled: true, codemode: false } })] });
+  const p = prepareGeneral(path.join(root, 'profile'), { project: directory, mock: 'http://127.0.0.1:1/v1', contributions: [codegraphContribution({ binding: { runtime_home: home, runtime_bin: '/fixture/not-started' }, serverVersion: '1.6.4', server: { type: 'local', command: ['/fixture/not-started'], disabled: true, codemode: false } })] });
   const options = p.document.plugins.find(plugin => typeof plugin === 'object' && plugin.package.endsWith('/codegraph/v2/plugins/access')).options;
   const data = fake(directory), permissions = [];
-  const ctx = { options, location: { directory }, session: data.api, permission: { assert: async value => { permissions.push(value); } } };
+  const ctx = { app: { version: '2.4.1' }, options, location: { directory }, session: data.api, permission: { assert: async value => { permissions.push(value); } } };
   const context = { agent: 'code-inspector', sessionID: 'ses_operator', messageID: 'msg_operator', id: 'tool_capture' };
   return { root, directory, home, p, data, ctx, context, permissions };
 }
@@ -43,6 +43,8 @@ test('projection never transports bodies/native/arguments/titles and preserves e
 test('capture/report/history work without SQL, count child once, classify diagnostics outside search and report truthful native paired savings', async t => {
   const f = fixture(t); f.data.messages.get('ses_child').push(assistant('msg_diag', 'codegraph-project', 2600));
   const withGraph = await executeBenchmark(f.ctx, capture, f.context); assert.equal(withGraph.metrics.tokens.total, 472); assert.equal(withGraph.metrics.tokens.reported_total, null); assert.equal(withGraph.metrics.search.codegraph.calls, 1);
+  assert.deepEqual(withGraph.captureRuntime, { codegraph_version: '1.6.4', opencode_version: '2.4.1' });
+  assert.equal(withGraph.historicalRuntimeVerified, false);
   assert.equal(withGraph.metrics.search.manual.calls, 2); assert.equal(withGraph.metrics.tools.count, 4);
   f.data.sessions.set('ses_control', session('ses_control', f.directory)); f.data.messages.set('ses_control', [assistant('msg_control', 'read', 2000, { ...usage, input: 990 })]);
   await executeBenchmark(f.ctx, { ...capture, sessionID: 'ses_control', variant: 'without-codegraph' }, f.context);
@@ -53,6 +55,9 @@ test('capture/report/history work without SQL, count child once, classify diagno
   assert.equal(history.families, 2); assert.equal(history.causalSavings, false); assert.equal(history.methodology.operatorExcluded, true); assert(!JSON.stringify(history).includes('ses_'));
   const store = path.join(f.ctx.options.benchmark.directory, 'runs'); const files = fs.readdirSync(store); assert.equal(files.length, 2);
   for (const file of files) { const data = fs.readFileSync(path.join(store, file), 'utf8'); assert(!data.includes('PRIVATE')); assert(!data.includes(f.directory)); assert.equal(fs.statSync(path.join(store, file)).mode & 0o777, 0o600); }
+  f.ctx.app.version = '2.5.0';
+  await executeBenchmark(f.ctx, { ...capture, sessionID: 'ses_control', variant: 'without-codegraph' }, f.context);
+  assert((await executeBenchmark(f.ctx, { action: 'report' }, f.context)).excluded_pairs.some(pair => /bindings distintos/.test(pair.reason)));
   const recaptured = await executeBenchmark(f.ctx, { ...capture, outcome: 'incorrect', utility: 'no', correctionsRequired: 2 }, f.context);
   assert.equal(recaptured.evaluation.utility, 'no'); assert.equal(fs.readdirSync(store).length, 2);
   const revisedReport = await executeBenchmark(f.ctx, { action: 'report' }, f.context); assert.equal(revisedReport.complete_accepted_pairs, 0);

@@ -7,19 +7,29 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { codegraphContribution } from '../general.mjs';
 import { prepareGeneral, generalEnvironment } from '../../../opencode-stack/v2/general/profile.mjs';
-import { officialRuntime } from '../../../opencode-stack/v2/general/lifecycle.mjs';
+import { npmRuntime } from '../../../opencode-stack/v2/general/npm-runtime.mjs';
 import { startOwnedServer, until } from '../../../opencode-stack/v2/general/owned-server.mjs';
 import { decodeList } from '../../../opencode-stack/v2/general/audit.mjs';
 
-test('official2.2.7 native lifecycle routes metadata/index writes without shell expansion, requires permission and blocks actor/session bypass', async t => {
+test('managed native lifecycle requires permission and blocks actor/session bypass', async t => {
   const root = fs.mkdtempSync('/tmp/opencode/graph-native-project-'); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const project = path.join(root, 'project'), home = path.join(root, 'runtime-home'), control = path.join(root, 'control'); fs.mkdirSync(project); fs.mkdirSync(control);
   assert.equal(spawnSync('/usr/bin/git', ['init', '--quiet', '-b', 'main'], { cwd: project, env: { PATH: '/usr/bin:/bin', HOME: root, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } }).status, 0);
   fs.writeFileSync(path.join(project, 'fixture.py'), 'def public_fixture():\n    return 1\n');
-  const binary = path.join(home, '.local/share/super-turing-opencode-codegraph/runtime/node_modules/.bin/codegraph'), calls = path.join(root, 'cli-calls.jsonl');
+  const binary = path.join(home, '.local/share/super-turing-opencode-codegraph/runtime-v2-1.6.4/node_modules/.bin/codegraph'), calls = path.join(root, 'cli-calls.jsonl');
   fs.mkdirSync(path.dirname(binary), { recursive: true }); fs.mkdirSync(path.join(path.dirname(path.dirname(binary)), '@colbymchenry/codegraph'), { recursive: true });
-  fs.writeFileSync(path.join(path.dirname(path.dirname(binary)), '@colbymchenry/codegraph/package.json'), '{"version":"1.5.0"}');
-  fs.writeFileSync(binary, '#!/usr/bin/python3\nimport json,os,sys\nfrom pathlib import Path\naction,raw=sys.argv[1:3];root=Path(raw);index=root/".codegraph"\nwith open(' + JSON.stringify(calls) + ',"a") as stream:stream.write(json.dumps({"action":action,"secret":"OPENCODE_PASSWORD" in os.environ})+"\\n")\nif action in ("init","sync","index"):\n index.mkdir(exist_ok=True);(index/"codegraph.db").write_text("SYNTHETIC_ONLY")\nelse:print(json.dumps({"initialized":(index/"codegraph.db").is_file(),"version":"1.5.0","indexPath":str(index),"fileCount":1,"nodeCount":2,"edgeCount":1,"index":{"builtWithVersion":"1.5.0","reindexRecommended":False}}))\n', { mode: 0o700 });
+  fs.writeFileSync(path.join(path.dirname(path.dirname(binary)), '@colbymchenry/codegraph/package.json'), '{"version":"1.6.4"}');
+  fs.writeFileSync(binary, `#!/usr/bin/python3
+import json,os,sqlite3,sys
+from pathlib import Path
+action,raw=sys.argv[1:3];root=Path(raw);index=root/".codegraph"
+with open(${JSON.stringify(calls)},"a") as stream:stream.write(json.dumps({"action":action,"secret":"OPENCODE_PASSWORD" in os.environ})+"\\n")
+if action in ("init","sync","index"):
+ index.mkdir(exist_ok=True)
+ with sqlite3.connect(index/"codegraph.db") as c:
+  c.executescript("create table if not exists schema_versions(version integer); delete from schema_versions; insert into schema_versions values(16); create table if not exists project_metadata(key text, value text); delete from project_metadata; insert into project_metadata values('index_state','complete'),('indexed_with_extraction_version','29');")
+else:print(json.dumps({"initialized":(index/"codegraph.db").is_file(),"version":"1.6.4","indexPath":str(index),"fileCount":1,"nodeCount":2,"edgeCount":1,"index":{"builtWithVersion":"1.6.4","reindexRecommended":False}}))
+`, { mode: 0o700 });
   fs.writeFileSync(path.join(control, 'package.json'), '{"type":"module"}'); fs.writeFileSync(path.join(control, 'index.ts'), 'import {Plugin} from "@opencode/plugin";export default Plugin.define({id:"fixture.graph-project",async setup(ctx){await ctx.session.hook("title",e=>{e.result="Lifecycle fixture"})}});');
   const trace = new Map(); let providerError, server;
   const unpack = value => { if (typeof value === 'string') { try { return unpack(JSON.parse(value)); } catch { return value; } } if (Array.isArray(value)) return value.map(unpack).join('\n'); if (value?.error) return JSON.stringify(value.error); if (value?.text !== undefined) return unpack(value.text); if (value?.content !== undefined) return unpack(value.content); return JSON.stringify(value); };
@@ -41,7 +51,7 @@ test('official2.2.7 native lifecycle routes metadata/index writes without shell 
     const binding = { runtime_home: home, runtime_bin: binary }, registry = path.join(home, '.local/state/super-turing-opencode-codegraph/projects.json');
     const p = prepareGeneral(path.join(root, 'profile'), { project, mock: 'http://127.0.0.1:' + model.address().port + '/v1', contributions: [codegraphContribution({ binding, server: { type: 'local', command: ['/not-started-fixture-mcp'], disabled: true, codemode: false } })], plugins: [control] });
     assert.equal(p.commands.length, 14); assert(p.commands.includes('codegraph-status') && p.commands.includes('codegraph-reindex')); assert(p.commands.includes('codegraph-benchmark'));
-    server = await startOwnedServer(officialRuntime(path.join(os.homedir(), '.local/share/opencode-v2-clean')).binary, p, value => ({ ...generalEnvironment(value), OPENCODE_CODEGRAPH_ALLOW_TEMP: '1' }));
+    server = await startOwnedServer(npmRuntime(path.join(os.homedir(), '.local/share/opencode-v2-clean')).binary, p, value => ({ ...generalEnvironment(value), OPENCODE_CODEGRAPH_ALLOW_TEMP: '1' }));
     const allow = [{ action: 'codegraph-project-write', resource: '*', effect: 'allow' }];
     const execute = async (kind, agent = 'master-dev', permissions = allow) => {
       const created = await server.request('POST', '/api/session', { agent, title: 'Synthetic lifecycle ' + kind, location: { directory: project }, model: { providerID: 'workshop-mock', id: 'mock' }, permissions }); assert.equal(created.status, 200);

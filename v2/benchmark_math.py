@@ -17,6 +17,12 @@ original_pair = core.compatible_pair
 def pair(left, right):
     if left.get('measurement') != right.get('measurement') or left.get('measurement') != MEASUREMENT:
         return 'backend/measurement distintos; no mezclar V1/V2 o definiciones'
+    if any(record.get('runtime_provenance') != 'configured binding at capture; historical execution version unknown'
+           or not all((record.get('runtime') or {}).get(key) for key in ('codegraph_version', 'opencode_version'))
+           for record in (left, right)):
+        return 'pin al capturar no comprobado; no mezclar registros anteriores'
+    if left.get('runtime') != right.get('runtime'):
+        return 'bindings distintos al capturar; no agregar este par'
     return original_pair(left, right)
 core.compatible_pair = pair
 core.is_codegraph_tool = lambda name: str(name) == 'codegraph_codegraph_explore'
@@ -34,7 +40,8 @@ def execute(value):
         result = core.build_report(records)
         result['measurement'] = MEASUREMENT
         result['schema_version'] = 3
-        note = 'Medición V2: suma de componentes normalizados exclusivos (input/output/reasoning/cache read/write); NO total reportado del proveedor ni costo facturado. Sin mezcla V1/V2.\n\n'
+        result['runtimeProvenance'] = {'captureBindingOnly': True, 'historicalRuntimeVerified': False, 'comparisonsByRuntimeVersion': False}
+        note = 'Medición V2: suma de componentes normalizados exclusivos (input/output/reasoning/cache read/write); NO total reportado del proveedor ni costo facturado. Sin mezcla V1/V2. La versión es el binding al capturar, no la de la sesión medida.\n\n'
         return {'report': result, 'markdown': note + core.report_markdown(result).replace('Tokens totales', 'Tokens derivados (componentes exclusivos)')}
     if value['operation'] == 'history':
         groups = defaultdict(list)

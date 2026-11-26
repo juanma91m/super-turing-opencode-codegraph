@@ -1,6 +1,65 @@
-# CodeGraph en OpenCode V2 oficial — incremento de consulta
+# CodeGraph en OpenCode V2
 
-## Estado
+## Runtime vigente y actualización
+
+El addon nativo V2 usa **CodeGraph 1.6.4** (SQLite schema 16,
+extractor 29). El pin y la integridad publicados están en `nativeV2`
+de `CODEGRAPH-MANIFEST.json`. La instalación legacy V1 conserva su
+pin y flujo anteriores; no se usa su binario como fallback de V2.
+
+El operador prepara el paquete `@colbymchenry/codegraph@1.6.4` desde
+npm en un prefijo nuevo `~/.local/share/super-turing-opencode-codegraph/runtime-v2-1.6.4`,
+con las dependencias opcionales de la plataforma y el `dist.integrity`
+del manifiesto. Por ejemplo, desde el repo del addon, con autorización
+de instalación y un prefijo todavía inexistente:
+
+```bash
+version=$(jq -er .nativeV2.version CODEGRAPH-MANIFEST.json)
+integrity=$(jq -er .nativeV2.npmIntegrity CODEGRAPH-MANIFEST.json)
+package="@colbymchenry/codegraph@$version"
+prefix="$HOME/.local/share/super-turing-opencode-codegraph/runtime-v2-$version"
+test ! -e "$prefix" && test ! -L "$prefix" &&
+test "$(npm view "$package" dist.integrity --registry=https://registry.npmjs.org/)" = "$integrity" &&
+npm install --prefix "$prefix" --save-exact --ignore-scripts --include=optional --no-audit --no-fund \
+  --registry=https://registry.npmjs.org/ "$package" &&
+test "$(jq -er '.packages["node_modules/@colbymchenry/codegraph"].integrity' "$prefix/package-lock.json")" = "$integrity" &&
+test "$(CODEGRAPH_NO_DOWNLOAD=1 CODEGRAPH_TELEMETRY=0 CODEGRAPH_NO_UPDATE_CHECK=1 "$prefix/node_modules/.bin/codegraph" --version)" = "$version"
+```
+
+No componer si falla alguna verificación; no reemplazar un prefijo activo.
+El selector
+también acepta un `runtime-candidate-1.6.4` ya instalado si el nuevo
+prefijo no existe, pero nunca un runtime de otra versión. La selección
+no instala ni modifica el OpenCode activo.
+
+1. Cerrar los clientes que usen el índice a trasladar. Preservar su
+   directorio completo y el binding anterior para rollback.
+2. Reusar el índice existente si su esquema, extractor, estado e
+   identidad de checkout son compatibles. No repetir `init` por
+   rutina ni copiar SQLite entre worktrees.
+3. Un índice de esquema distinto no se abre ni con `status` ni con
+   `reindex` confirmado. Para renovarlo, preparar una ruta aislada y
+   usar el lifecycle nativo con la aprobación del operador. Si sólo
+   cambia el extractor y el esquema es compatible, el `reindex`
+   confirmado sigue disponible. Validar antes de activar la ruta
+   definitiva y retirar binarios o copias antiguas.
+
+El arranque MCP usa un cwd sin índice ancestro. La consulta y el
+mantenimiento comprueban metadatos SQLite checkpointed de sólo
+lectura antes de iniciar cualquier apertura del índice. Un resultado
+incompleto o no comprobable se rechaza sin migrar. La guarda por
+nombres versionados se mantiene: `codegraph.json` y el filtro de
+salida no autorizan abrir fuentes protegidas ni saltar esa guarda.
+El filtro nativo retiene resultados de `explore` con nombres o
+marcadores reconocidos antes del historial y del próximo turno; no
+es un detector universal ni sanea resultados anteriores.
+
+El benchmark registra el pin del binding y la versión de OpenCode
+**al capturar**; no prueba qué versión ejecutó la sesión histórica.
+Pares con pins faltantes, etiquetas antiguas o bindings distintos
+quedan fuera de la comparación sin reescribir capturas previas.
+
+## Puesta en servicio original (histórica)
 
 `v2/general.mjs` agrega el aporte nativo al candidato general, sin
 boundary de workshop ni init automático. Usa cwd de caché neutral y rechaza
@@ -34,9 +93,9 @@ comprobadas; utilidad/relevancia de esa respuesta parcial**, sin certificar fres
 o cobertura. No persistir paths/símbolos o código del resultado en este documento.
 No se inicializó, sincronizó o reindexó ningún proyecto real ni se modificó V1.
 
-La auditoría de instalación V1 informó runtime **1.5.0**, 16 assets presentes sin
-drift, MCP canónico habilitado, filtro `explore`, telemetría desactivada. Se reutiliza
-ese runtime; no hay descarga, recompilación ni copia de índices o backends nuevos.
+La auditoría de instalación V1 original informó runtime **1.5.0**,
+16 assets presentes sin drift, MCP canónico habilitado, filtro `explore`
+y telemetría desactivada. Ese runtime no es el binding V2 vigente.
 
 ## Alcance y permisos
 
@@ -71,8 +130,10 @@ Se fijan telemetría/update checks apagados, igual que V1. `CODEGRAPH_NO_DOWNLOA
 evita self-heal por red si falta el bundle: falla con claridad en lugar de instalar.
 El guardrail no cambia el runtime sano ya presente ni resuelve faltantes en silencio.
 
-**Read-only semántico no significa cero escrituras físicas.** Al abrir proyectos,
-CodeGraph conserva SQLite/WAL/migraciones, locks, daemon, catch-up y watchers normales.
+**Read-only semántico no significa cero escrituras físicas.** Tras
+el control de compatibilidad, CodeGraph conserva SQLite/WAL, locks,
+daemon, catch-up y watchers normales. No se abre un esquema anterior
+para migrarlo en sitio.
 El servidor del workshop se inicia fuera de índices por defecto y las consultas
 eligen root explícito; no se desactivan mecanismos upstream ni se promete un sandbox
 OS. El coordinador rechaza abrir MCP si el workshop tiene un ancestro con DB de índice.

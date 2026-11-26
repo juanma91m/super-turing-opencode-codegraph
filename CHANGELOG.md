@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Runtime nativo V2 fijo en CodeGraph 1.6.4, independiente del instalador V1.
+- Reutilización de índices compatibles, con rechazo previo de esquemas antiguos
+  y retención de resultados `explore` que contienen indicadores protegidos.
+- Procedencia del binding al capturar benchmarks; sin atribución histórica ni
+  mezcla de pares con bindings de captura distintos.
 - Métricas v2: history retrospectivo SQLite read-only, familias parent_id sin doble
   conteo, tokens desglosados, tiempos/latencia con cobertura y null para ausentes.
 - Captura A/B por alcance explícito de tarea y política, evaluación opcional de

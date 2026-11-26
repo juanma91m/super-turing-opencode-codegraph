@@ -10,6 +10,13 @@
     "release": "https://github.com/colbymchenry/codegraph/releases/tag/v1.5.0",
     "npmIntegrity": "sha512-/l1JMVOQ9WGQLrc/IIuAg7Igr944t79/oNCJTcnGkYtIeQx2XFIqI0ho+9Les/Yu4zKfmPU17hIUshD6yP1fKw=="
   },
+  "nativeV2": {
+    "version": "1.6.4",
+    "release": "https://github.com/colbymchenry/codegraph/releases/tag/v1.6.4",
+    "npmIntegrity": "sha512-Vn4rKe3wTDi8jV3Ni3nUtCX17X3y+hv5rBGkOrO1dtE9ICj3eByVbHM/A9CmR68Cjl8QiGRoOhn7phnS1hyjZg==",
+    "schemaVersion": 16,
+    "extractionVersion": 29
+  },
   "managedFiles": [
     "PLAYBOOK-CODEGRAPH.md",
     "commands/codegraph-benchmark.md",

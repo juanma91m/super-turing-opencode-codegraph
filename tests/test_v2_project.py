@@ -1,8 +1,10 @@
 import importlib.util
+from contextlib import closing
 import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -10,6 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'v2'))
+from runtime import PREFIX, RUNTIME_NAMES
 spec = importlib.util.spec_from_file_location('native_project', ROOT / 'v2/project.py')
 native = importlib.util.module_from_spec(spec); spec.loader.exec_module(native)
 
@@ -19,19 +22,21 @@ class ProjectLifecycleTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='codegraph-project-', dir='/tmp/opencode'); self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name); self.home = self.base / 'home'; self.repo = self.base / 'repo'; self.repo.mkdir()
         self.git('init', '--quiet', '-b', 'main')
-        self.binary = self.home / '.local/share/super-turing-opencode-codegraph/runtime/node_modules/.bin/codegraph'
+        self.binary = self.home / '.local/share/super-turing-opencode-codegraph/runtime-v2-1.6.4/node_modules/.bin/codegraph'
         self.binary.parent.mkdir(parents=True)
         package = self.binary.parent.parent / '@colbymchenry/codegraph/package.json'; package.parent.mkdir(parents=True)
-        package.write_text('{"version":"1.5.0"}')
+        package.write_text('{"version":"1.6.4"}')
         self.binary.write_text('''#!/usr/bin/python3
-import json,os,sys
+import json,os,sqlite3,sys
 from pathlib import Path
 action,root=sys.argv[1:3];root=Path(root);index=root/os.environ.get('CODEGRAPH_DIR','.codegraph')
 with (Path(__file__).parent/'calls.jsonl').open('a') as f:f.write(json.dumps({'action':action,'args':sys.argv[1:],'secret':'OPENCODE_PASSWORD' in os.environ,'tuning':os.environ.get('CODEGRAPH_NO_WATCH')})+'\\n')
 if action in ('init','sync','index'):
- index.mkdir(exist_ok=True);(index/'codegraph.db').write_text('SYNTHETIC_INDEX')
+ index.mkdir(exist_ok=True)
+ with sqlite3.connect(index/'codegraph.db') as c:
+  c.executescript("create table if not exists schema_versions(version integer); delete from schema_versions; insert into schema_versions values(16); create table if not exists project_metadata(key text, value text); delete from project_metadata; insert into project_metadata values('index_state','complete'),('indexed_with_extraction_version','29');")
 else:
- print(json.dumps({'initialized':(index/'codegraph.db').is_file(),'version':'1.5.0','indexPath':str(index),'files':2,'nodes':3,'edges':1,'rawCode':'MUST_NOT_RETURN','index':{'builtWithVersion':'1.5.0','reindexRecommended':(root/'recommend').exists()},'worktreeMismatch':(root/'mismatch').exists()}))
+ print(json.dumps({'initialized':(index/'codegraph.db').is_file(),'version':'1.6.4','indexPath':str(index),'files':2,'nodes':3,'edges':1,'rawCode':'MUST_NOT_RETURN','index':{'builtWithVersion':'1.6.4','reindexRecommended':(root/'recommend').exists()},'worktreeMismatch':(root/'mismatch').exists()}))
 '''); self.binary.chmod(0o700)
         self.selected = {'binding': {'runtime_home': str(self.home), 'runtime_bin': str(self.binary), 'environment': {'CODEGRAPH_NO_WATCH': '1'}}, 'registry': str(self.home / '.local/state/super-turing-opencode-codegraph/projects.json')}
         self.host = {'OPENCODE_CODEGRAPH_ALLOW_TEMP': '1'}
@@ -73,9 +78,10 @@ else:
         with self.assertRaisesRegex(ValueError, 'confirmReindex'): self.execute('reindex')
         self.assertEqual(self.calls(), [])
         (self.repo / '.codegraph').mkdir()
-        with self.assertRaisesRegex(ValueError, 'not initialized'): self.execute('init')
+        with self.assertRaisesRegex(ValueError, 'incompatible'): self.execute('init')
         self.assertNotIn('init', [call['action'] for call in self.calls()])
-        (self.repo / '.codegraph/codegraph.db').write_text('SYNTHETIC')
+        (self.repo / '.codegraph').rmdir()
+        self.execute('init')
         (self.repo / 'recommend').touch()
         with self.assertRaisesRegex(ValueError, 'Explicit reindex'): self.execute('sync')
         with self.assertRaisesRegex(ValueError, 'Explicit reindex'): self.execute('init')
@@ -83,6 +89,47 @@ else:
         (self.repo / 'mismatch').touch()
         with self.assertRaisesRegex(ValueError, 'mismatch'): self.execute('reindex', confirmReindex=True)
         self.assertNotIn('index', [call['action'] for call in self.calls()])
+
+    def test_legacy_schema_never_reaches_engine_even_with_confirmed_reindex(self):
+        index = self.repo / '.codegraph'; index.mkdir()
+        db = index / 'codegraph.db'
+        with closing(sqlite3.connect(db)) as con:
+            con.executescript('create table schema_versions(version integer); insert into schema_versions values (8);')
+        before = db.read_bytes()
+        for action in ('status', 'init', 'sync', 'reindex'):
+            with self.assertRaisesRegex(ValueError, 'no automatic migration'):
+                self.execute(action, **({'confirmReindex': True} if action == 'reindex' else {}))
+        self.assertEqual(db.read_bytes(), before)
+        self.assertEqual(list(index.iterdir()), [db])
+        self.assertEqual(self.calls(), [])
+
+    def test_compatible_schema_stale_extraction_requires_explicit_reindex(self):
+        self.execute('init')
+        with closing(sqlite3.connect(self.repo / '.codegraph/codegraph.db')) as con, con:
+            con.execute("update project_metadata set value='28' where key='indexed_with_extraction_version'")
+        before = self.calls()
+        for action in ('status', 'init', 'sync'):
+            with self.assertRaisesRegex(ValueError, 'Stale extraction'):
+                self.execute(action)
+        self.assertEqual(self.calls(), before)
+        self.assertTrue(self.execute('reindex', confirmReindex=True)['status']['initialized'])
+
+    def test_query_probe_checks_schema_and_names_without_launching_the_engine(self):
+        self.execute('init')
+        scripts = self.base / 'binding'; scripts.mkdir()
+        shutil.copyfile(ROOT / 'v2/project.py', scripts / 'codegraph_project_v2.py')
+        shutil.copyfile(ROOT / 'v2/runtime.py', scripts / 'codegraph_runtime.py')
+        (scripts / 'codegraph-maintenance.json').write_text(json.dumps(self.selected))
+        command = ['/usr/bin/python3', '-B', str(scripts / 'codegraph_project_v2.py'), '--query-index']
+        def probe():
+            return subprocess.run(command, input=json.dumps(self.request('status')), env={**self.host, 'PATH': '/usr/bin:/bin'},
+                                  capture_output=True, text=True, timeout=10)
+        before = self.calls()
+        self.assertEqual(probe().returncode, 0)
+        (self.repo / 'token.json').write_text('SYNTHETIC_SOURCE_MUST_NOT_LEAVE')
+        result = probe()
+        self.assertNotEqual(result.returncode, 0); self.assertNotIn('SYNTHETIC_SOURCE_MUST_NOT_LEAVE', result.stderr)
+        self.assertEqual(self.calls(), before)
 
     def test_roots_symlinks_temp_flag_and_sensitive_sources_fail_without_runtime_work(self):
         sub = self.repo / 'sub'; sub.mkdir()
@@ -118,8 +165,11 @@ class RealPinnedRuntimeTest(unittest.TestCase):
     def test_actual_runtime_init_adopt_sync_reindex_status_only_on_owned_temporary_index(self):
         with tempfile.TemporaryDirectory(prefix='codegraph-real-project-', dir='/tmp/opencode') as temporary:
             base = Path(temporary); home = base / 'home'; repo = base / 'repo'; repo.mkdir()
-            source = Path.home() / '.local/share/super-turing-opencode-codegraph/runtime/node_modules'
-            destination = home / '.local/share/super-turing-opencode-codegraph/runtime/node_modules'
+            root = Path.home() / PREFIX
+            source = next((root / name / 'node_modules' for name in RUNTIME_NAMES if (root / name).is_dir()), None)
+            if source is None:
+                self.skipTest('Pinned public 1.6.4 runtime is not installed')
+            destination = home / '.local/share/super-turing-opencode-codegraph/runtime-v2-1.6.4/node_modules'
             # Copy only the two public program packages; never HOME/cache/indexes,
             # auth or npm state. No download/recompile/runtime replacement.
             for name in ('codegraph', 'codegraph-linux-x64'):
@@ -141,7 +191,7 @@ class RealPinnedRuntimeTest(unittest.TestCase):
             def request(action, **extra): return native.execute({'action': action, 'projectRoot': str(repo), **extra}, selected, host)
             self.assertFalse(request('status')['status']['initialized']); self.assertFalse((repo / '.codegraph/codegraph.db').exists())
             created = request('init'); self.assertTrue(created['status']['initialized']); self.assertTrue((repo / '.codegraph/codegraph.db').is_file())
-            self.assertEqual(created['status']['version'], '1.5.0')
+            self.assertEqual(created['status']['version'], '1.6.4')
             self.assertTrue(request('init')['adoptedExisting'])
             source_file.write_text(source_file.read_text() + '\ndef added():\n    return entry()\n')
             updated = source_file.read_bytes(); self.assertTrue(request('sync')['status']['initialized'])

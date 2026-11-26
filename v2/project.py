@@ -20,9 +20,9 @@ from contextlib import contextmanager
 
 sys.dont_write_bytecode = True
 if (Path(__file__).parent / 'codegraph_runtime.py').is_file():
-    from codegraph_runtime import runtime_env, validate
+    from codegraph_runtime import VERSION, check_index, runtime_env, validate
 else:
-    from runtime import runtime_env, validate
+    from runtime import VERSION, check_index, runtime_env, validate
 
 ACTIONS = {'init', 'status', 'sync', 'reindex'}
 MAX_OUTPUT = 4 * 1024 * 1024
@@ -84,8 +84,8 @@ def metadata(request, selected, parent):
 
 def check_sensitive(root):
     for file in git(root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '.').split('\0'):
-        parts = file.split('/'); name = parts[-1]
-        if (name.startswith('.env') and name != '.env.example') or any(part in ('.ssh', '.gnupg') for part in parts) or name in ('auth.json', 'credentials.json') or Path(name).suffix.lower() in ('.pem', '.key', '.p12', '.pfx'):
+        parts = file.lower().split('/'); name = parts[-1]
+        if (name.startswith('.env') and file.split('/')[-1] != '.env.example') or any(part in ('.ssh', '.gnupg') for part in parts) or name in ('auth.json', 'credentials.json', 'token.json', 'tokens.json', 'secrets.json') or Path(name).suffix in ('.pem', '.key', '.p12', '.pfx'):
             raise ValueError('Potential sensitive indexed source; reconcile tracked/ignore policy first, no contents read')
 
 def backend(selected, root, *args):
@@ -220,14 +220,19 @@ def execute(request, selected, parent=None, preflight=False):
     action = request['action']
     if preflight: return {'action': action, 'projectRoot': str(root), 'indexPath': str(index), 'registry': selected['registry']}
     if action == 'status':
-        value = status(selected, root, index)
+        if check_index(index, allow_absent=True):
+            check_sensitive(root)
+            value = status(selected, root, index)
+        else:
+            value = {'initialized': False, 'version': VERSION}
         return {'action': action, 'projectRoot': str(root), 'status': filtered(value), 'indexOperationIssued': False, 'registryUpdated': False}
     check_sensitive(root)
+    check_index(index, allow_absent=action == 'init', allow_stale_extraction=action == 'reindex')
     registry_preflight(Path(selected['registry']))
     if action in ('sync', 'reindex') and (not index.is_dir() or not (index / 'codegraph.db').is_file()): raise ValueError('Existing index DB required; no init/repair fallback')
     lock = owner_path(root, 'opencode-codegraph-maintenance.lock'); lock.parent.mkdir(parents=True, exist_ok=True); no_links(lock)
     with owner_lock(lock, nonblocking=True):
-        existed = index.exists()
+        existed = check_index(index, allow_absent=action == 'init', allow_stale_extraction=action == 'reindex')
         if existed:
             current = status(selected, root, index)
             if current.get('worktreeMismatch'): raise ValueError('Index worktree mismatch; no adoption/rebuild')
@@ -237,6 +242,7 @@ def execute(request, selected, parent=None, preflight=False):
             backend(selected, root, 'init', str(root))
         elif action == 'sync': backend(selected, root, 'sync', str(root))
         elif action == 'reindex': backend(selected, root, 'index', str(root), '--force')
+        check_index(index)
         final = status(selected, root, index); compatible(final)
         if action == 'init': exclude(root, index)
         record(Path(selected['registry']), root, index, final)
@@ -244,10 +250,17 @@ def execute(request, selected, parent=None, preflight=False):
 
 if __name__ == '__main__':
     try:
-        if sys.argv[1:] not in ([], ['--preflight']): raise ValueError('No CLI overrides allowed')
+        if sys.argv[1:] not in ([], ['--preflight'], ['--query-index']): raise ValueError('No CLI overrides allowed')
         binding = json.loads((Path(__file__).parent / 'codegraph-maintenance.json').read_text())
         request = json.load(sys.stdin)
-        print(json.dumps(execute(request, binding, preflight=bool(sys.argv[1:]))))
+        if sys.argv[1:] == ['--query-index']:
+            if not isinstance(request, dict) or set(request) != {'action', 'projectRoot'} or request['action'] != 'status':
+                raise ValueError('Closed compatibility probe required')
+            root, index = metadata(request, config(binding), os.environ)
+            check_sensitive(root)
+            check_index(index)
+        else:
+            print(json.dumps(execute(request, binding, preflight=bool(sys.argv[1:]))))
     except json.JSONDecodeError:
         print('CodeGraph lifecycle metadata JSON invalid; raw values suppressed', file=sys.stderr)
         raise SystemExit(2)
